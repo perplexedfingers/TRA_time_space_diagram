@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
+import argparse
 import sys
 import os
 import shutil
 import time
+import pathlib
 
 import read_tra_json as tra_json
 import data_process as dp
@@ -49,13 +51,14 @@ diagram_hours = [
 
 
 # 程式執行段
-def main(argv_json_location, argv_website_svg_location, argv_select_trains, move_file):
+# def main(argv_json_location, argv_website_svg_location, argv_select_trains, move_file):
+def main(json_folder: pathlib.Path, svg_folder: pathlib.Path, train_numbers: [int]):
     json_files = []
     all_after_midnight_data = []
 
-    check_output_folder(argv_website_svg_location)
+    check_output_folder(svg_folder)
 
-    for root, dirs, files in os.walk(argv_json_location + '/'):
+    for root, dirs, files in os.walk(json_folder + '/'):
         for file in files:
             if file.split('.')[1] == 'json':
                 json_files.append(file.split('.')[0])
@@ -72,8 +75,8 @@ def main(argv_json_location, argv_website_svg_location, argv_select_trains, move
 
             print("目前進行日期" + file_date + "轉檔。" + "\n")
 
-            # 讀取 JSON 檔案，可選擇特定車次(argv_select_trains)
-            all_trains_json = tra_json.find_trains(tra_json.read_json(file_name), argv_select_trains)
+            # 讀取 JSON 檔案，可選擇特定車次(train_numbers)
+            all_trains_json = tra_json.find_trains(tra_json.read_json(file_name), train_numbers)
 
             all_trains_data = []
 
@@ -125,7 +128,7 @@ def main(argv_json_location, argv_website_svg_location, argv_select_trains, move
                                 diagram_hours,
                                 version)
 
-            if move_file == True:
+            if move_file:
                 if os.path.exists('JSON/' + file_name):
                     shutil.move('JSON/' + file_name, 'JSON_BACKUP/' + file_name)
 
@@ -158,43 +161,34 @@ def _print_usage(name):
 
 
 if __name__ == "__main__":
-    Parameters = []  # 參數集：參數1: JSON 檔位置, 參數2: 運行圖檔案存檔位置, 參數3: 特定車次繪製
+    desc =\
+        'Draw train time-space diagram accroding to timetable JSON file.'
+    parser = argparse.ArgumentParser(description=desc)
+    parser.add_argument('-i', type=pathlib.Path, default='JSON', dest='timetable_json_folder',
+                        help='Timetable JSON file folder')
+    parser.add_argument('-o', type=pathlib.Path, default='OUTPUT', dest='output_svg_folder',
+                        help='Output SVG folder')
+    parser.add_argument('specified_train_numbers', type=int, nargs='*', help='Multiple specified train number')
+    args = parser.parse_args()
 
-    print('************************************')
-    print('台鐵JSON轉檔運行圖程式 - 版本：' + version)
-    print('************************************\n')
+    main(json_folder=args.timetable_json_folder, svg_folder=args.output_svg_folder,
+         train_numbers=args.specified_train_numbers)
+    # else:
+    #     print('************************************')
+    #     print('台鐵JSON轉檔運行圖程式 - 版本：' + version)
+    #     print('************************************\n')
 
-    if len(sys.argv) == 4:
-        Parameters.append(sys.argv[1])
-        Parameters.append(sys.argv[2])
-        Parameters.append(sys.argv[3])
-        Parameters.append(True)
-    else:
-        Parameters.append('JSON')
-        Parameters.append('OUTPUT')
-
-        action = input('您需要執行特定車次嗎？不需要請直接輸入Enter，或者輸入 "Y"：\n')
-        if action.lower() == 'y':
-
-            select_trains = []
-
-            while True:
-                action = input('請問特定車次號碼？(請輸入車次號，如果有多個車次要選擇，請不斷輸入，要結束直接輸入Enter)：\n')
-
-                if action != '':
-                    select_trains.append(action)
-                if action == '':
-                    break
-
-            Parameters.append(select_trains)
-        elif action.lower() == 'h':
-            _print_usage("1h")
-        else:
-            Parameters.append('')
-
-        Parameters.append(False)
-
-    if Parameters[2] == 'ALL':
-        Parameters[2] = ''
-
-    main(Parameters[0], Parameters[1], Parameters[2], Parameters[3])
+    #     Parameters = []
+    #     action = input('您需要執行特定車次嗎？不需要請直接輸入Enter，或者輸入 "Y"：\n')
+    #     if action.lower() == 'y':
+    #         select_trains = []
+    #         while True:
+    #             action = input('請問特定車次號碼？(請輸入車次號，如果有多個車次要選擇，請不斷輸入，要結束直接輸入Enter)：\n')
+    #             if action != '':
+    #                 select_trains.append(action)
+    #             else:
+    #                 break
+    #         Parameters.append(select_trains)
+    #     else:
+    #         Parameters.append([])
+    #     main(Parameters[0], Parameters[1], Parameters[2], Parameters[3])
