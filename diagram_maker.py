@@ -30,7 +30,7 @@ dict_car_kind = {
     '1120': 'fu_hsing',
     '1140': 'ordinary',
     '0000': 'special'
-    }
+}
 
 dict_line_kind = {
     'LINE_WN': '西部幹線北段（基隆-竹南）',
@@ -48,7 +48,8 @@ dict_line_kind = {
     'LINE_SL': '沙崙線（中洲-沙崙',
 }
 
-lines = ['LINE_WN', 'LINE_WM', 'LINE_WSEA', 'LINE_WS', 'LINE_P', 'LINE_S', 'LINE_T', 'LINE_N', 'LINE_I', 'LINE_PX', 'LINE_NW', 'LINE_J', 'LINE_SL']
+lines = ['LINE_WN', 'LINE_WM', 'LINE_WSEA', 'LINE_WS', 'LINE_P', 'LINE_S',
+         'LINE_T', 'LINE_N', 'LINE_I', 'LINE_PX', 'LINE_NW', 'LINE_J', 'LINE_SL']
 lines_stations = {}  # 各營運路線車站於運行圖中的位置，用於運行線的繪製
 lines_stations_for_background = {}  # 各營運路線車站於運行圖中的位置，包含廢站、號誌站等車站
 
@@ -145,48 +146,53 @@ class TimeSpaceDiagram:
 
             self._draw_background(version)
 
-        def _add_text(self, x, y, string, _color = None, _class = None, transform = None):
+        def _add_text(self, x, y, string, _color=None, _class=None, transform=None):
 
             transformStr = ''
 
-            if transform is not None :
+            if transform is not None:
                 transformStr = ' transform="' + transform + '"'
-            if _class is not None :
-                self.fileHandler.write( '<text class="' + _class + '" x="' + x + '" y="' + y + '"' + transformStr + '>' + string + '</text>' )
-            elif _color is not None :
-                self.fileHandler.write( '<text fill="' + _color + '" x="' + x + '" y="' + y + '"' + transformStr + '>' + string + '</text>' )
-            else :
-                self.fileHandler.write( '<text x="' + x + '" y="' + y + '"' + transformStr + '>' + string + '</text>' )
+            if _class is not None:
+                self.fileHandler.write('<text class="' + _class + '" x="' + x + '" y="' +
+                                       y + '"' + transformStr + '>' + string + '</text>')
+            elif _color is not None:
+                self.fileHandler.write('<text fill="' + _color + '" x="' + x + '" y="' +
+                                       y + '"' + transformStr + '>' + string + '</text>')
+            else:
+                self.fileHandler.write('<text x="' + x + '" y="' + y + '"' + transformStr + '>' + string + '</text>')
 
-        def _add_line(self, x1, y1, x2, y2, _color = None, _class = None ) :
+        def _add_line(self, x1, y1, x2, y2, _color=None, _class=None):
 
-            if _class is not None :
-                self.fileHandler.write( '<line class="' + _class + '" x1="' + x1 + '" x2="' + x2 + '" y1="' + y1 + '" y2="' + y2 + '" />' )
-            elif _color is not None :
-                self.fileHandler.write( '<line stroke="' + _color + '" x1="' + x1 + '" x2="' + x2 + '" y1="' + y1 + '" y2="' + y2 + '" />' )
-            else :
-                self.fileHandler.write( '<line x1="' + x1 + '" x2="' + x2 + '" y1="' + y1 + '" y2="' + y2 + '" />' )
+            if _class is not None:
+                self.fileHandler.write('<line class="' + _class + '" x1="' + x1 + '" x2="' +
+                                       x2 + '" y1="' + y1 + '" y2="' + y2 + '" />')
+            elif _color is not None:
+                self.fileHandler.write('<line stroke="' + _color + '" x1="' + x1 +
+                                       '" x2="' + x2 + '" y1="' + y1 + '" y2="' + y2 + '" />')
+            else:
+                self.fileHandler.write('<line x1="' + x1 + '" x2="' + x2 + '" y1="' + y1 + '" y2="' + y2 + '" />')
 
-        def _add_path( self, pathList, lineId, _color = None, _class = None, _emphasis = False ) :
+        def _add_path(self, pathList, lineId, _color=None, _class=None, _emphasis=False):
 
             emphasisStr = '" style="stroke-width: 4" />' if _emphasis else '" />'
 
-            if _class is not None :
-                self.fileHandler.write( '<path class="' + _class + '" d="' + pathList + '" id="' + lineId + emphasisStr )
-            elif _color is not None :
-                self.fileHandler.write( '<path stroke="' + _color + '" d="' + pathList + '" id="' + lineId + emphasisStr )
-            else :
-                self.fileHandler.write( '<path d="' + pathList + '" id="' + lineId + emphasisStr )
+            if _class is not None:
+                self.fileHandler.write('<path class="' + _class + '" d="' + pathList + '" id="' + lineId + emphasisStr)
+            elif _color is not None:
+                self.fileHandler.write('<path stroke="' + _color + '" d="' + pathList + '" id="' + lineId + emphasisStr)
+            else:
+                self.fileHandler.write('<path d="' + pathList + '" id="' + lineId + emphasisStr)
 
         def _add_path_text(self, _line_id, _train_id, _class, _startOffset):
-            self.fileHandler.write( '<text><textPath class = "' + _class + '" startOffset = "' + _startOffset + '" xlink:href = "#' +
-                                    _line_id + '"><tspan dy="-3" font-size="80%">' + _train_id + '</tspan></textPath></text>' )
+            self.fileHandler.write('<text><textPath class = "' + _class + '" startOffset = "' + _startOffset + '" xlink:href = "#' +
+                                   _line_id + '"><tspan dy="-3" font-size="80%">' + _train_id + '</tspan></textPath></text>')
 
         # 繪製基底圖
         def _draw_background(self, version):
             localtime = time.asctime(time.localtime(time.time()))
 
-            self._add_text("5", "20", dict_line_kind[self.line] + ' 日期：' + self.date +'，運行圖均來自台鐵公開資料所分析，僅供參考，正確資料與實際運轉狀況請以台鐵網站或公告為主。台鐵JSON Open Data轉檔運行圖程式版本：' + version + ' 轉檔時間：' + localtime, "#000000", None, None)
+            self._add_text("5", "20", dict_line_kind[self.line] + ' 日期：' + self.date +
+                           '，運行圖均來自台鐵公開資料所分析，僅供參考，正確資料與實際運轉狀況請以台鐵網站或公告為主。台鐵JSON Open Data轉檔運行圖程式版本：' + version + ' 轉檔時間：' + localtime, "#000000", None, None)
 
             # 時間線
             hours = self.diagram_hours
@@ -233,7 +239,7 @@ class TimeSpaceDiagram:
                         self._add_text(str(5 + i * 1200), str(y - 5), StationName, "#c2c2a3", None, None)
 
         # 繪製線條
-        def draw_line(self, train_id, path, color, option_id = None):
+        def draw_line(self, train_id, path, color, option_id=None):
 
             if option_id is None:
                 line_id = train_id

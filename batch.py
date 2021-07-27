@@ -1,11 +1,9 @@
-# 台鐵運行圖 Python 版
+# -*- coding: utf-8 -*-
 import sys
 import os
-import io
 import shutil
 import time
 
-# 自訂class與module
 import read_tra_json as tra_json
 import data_process as dp
 import diagram_maker as dm
@@ -15,40 +13,43 @@ from progessbar import progress
 # sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 version = '1.021'
 
-lines_diagram_setting = {'LINE_WN': ['/west_link_north/WESTNORTH_', 'LINE_WN', 3000],
-                         'LINE_WM': ['/west_link_moutain/WESTMOUNTAIN_', 'LINE_WM', 2000],
-                         'LINE_WSEA': ['/west_link_sea/WESTSEA_', 'LINE_WSEA', 2000],
-                         'LINE_WS': ['/west_link_south/WESTSOUTH_', 'LINE_WS', 4000],
-                         'LINE_P': ['/pingtung/PINGTUNG_', 'LINE_P', 2000],
-                         'LINE_S': ['/south_link/SOUTHLINK_', 'LINE_S', 2000],
-                         'LINE_T': ['/taitung/TAITUNG_', 'LINE_T', 2000],
-                         'LINE_N': ['/north_link/NORTHLINK_', 'LINE_N', 2000],
-                         'LINE_I': ['/yilan/YILAN_', 'LINE_I', 2000],
-                         'LINE_PX': ['/pingxi/PINGXI_', 'LINE_PX', 1250],
-                         'LINE_NW': ['/neiwan/NEIWAN_', 'LINE_NW', 1250],
-                         'LINE_J': ['/jiji/JIJI_', 'LINE_J', 1250],
-                         'LINE_SL': ['/shalun/SHALUN_', 'LINE_SL', 650]}
+lines_diagram_setting = {
+    'LINE_WN': ['/west_link_north/WESTNORTH_', 'LINE_WN', 3000],
+    'LINE_WM': ['/west_link_moutain/WESTMOUNTAIN_', 'LINE_WM', 2000],
+    'LINE_WSEA': ['/west_link_sea/WESTSEA_', 'LINE_WSEA', 2000],
+    'LINE_WS': ['/west_link_south/WESTSOUTH_', 'LINE_WS', 4000],
+    'LINE_P': ['/pingtung/PINGTUNG_', 'LINE_P', 2000],
+    'LINE_S': ['/south_link/SOUTHLINK_', 'LINE_S', 2000],
+    'LINE_T': ['/taitung/TAITUNG_', 'LINE_T', 2000],
+    'LINE_N': ['/north_link/NORTHLINK_', 'LINE_N', 2000],
+    'LINE_I': ['/yilan/YILAN_', 'LINE_I', 2000],
+    'LINE_PX': ['/pingxi/PINGXI_', 'LINE_PX', 1250],
+    'LINE_NW': ['/neiwan/NEIWAN_', 'LINE_NW', 1250],
+    'LINE_J': ['/jiji/JIJI_', 'LINE_J', 1250],
+    'LINE_SL': ['/shalun/SHALUN_', 'LINE_SL', 650]}
 
-lines_diagram_setting_test = {'LINE_WN': ['/WESTNORTH_', 'LINE_WN', 3000],
-                              'LINE_WM': ['/WESTMOUNTAIN_', 'LINE_WM', 2000],
-                              'LINE_WSEA': ['/WESTSEA_', 'LINE_WSEA', 2000],
-                              'LINE_WS': ['/WESTSOUTH_', 'LINE_WS', 4000],
-                              'LINE_P': ['/PINGTUNG_', 'LINE_P', 2000],
-                              'LINE_S': ['/SOUTHLINK_', 'LINE_S', 2000],
-                              'LINE_T': ['/TAITUNG_', 'LINE_T', 2000],
-                              'LINE_N': ['/NORTHLINK_', 'LINE_N', 2000],
-                              'LINE_I': ['/YILAN_', 'LINE_I', 2000],
-                              'LINE_PX': ['/PINGXI_', 'LINE_PX', 1250],
-                              'LINE_NW': ['/NEIWAN_', 'LINE_NW', 1250],
-                              'LINE_J': ['/JIJI_', 'LINE_J', 1250],
-                              'LINE_SL': ['/SHALUN_', 'LINE_SL', 650]}
+lines_diagram_setting_test = {
+    'LINE_WN': ['/WESTNORTH_', 'LINE_WN', 3000],
+    'LINE_WM': ['/WESTMOUNTAIN_', 'LINE_WM', 2000],
+    'LINE_WSEA': ['/WESTSEA_', 'LINE_WSEA', 2000],
+    'LINE_WS': ['/WESTSOUTH_', 'LINE_WS', 4000],
+    'LINE_P': ['/PINGTUNG_', 'LINE_P', 2000],
+    'LINE_S': ['/SOUTHLINK_', 'LINE_S', 2000],
+    'LINE_T': ['/TAITUNG_', 'LINE_T', 2000],
+    'LINE_N': ['/NORTHLINK_', 'LINE_N', 2000],
+    'LINE_I': ['/YILAN_', 'LINE_I', 2000],
+    'LINE_PX': ['/PINGXI_', 'LINE_PX', 1250],
+    'LINE_NW': ['/NEIWAN_', 'LINE_NW', 1250],
+    'LINE_J': ['/JIJI_', 'LINE_J', 1250],
+    'LINE_SL': ['/SHALUN_', 'LINE_SL', 650]}
 
-diagram_hours = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 1, 2, 3, 4, 5, 6]
+diagram_hours = [
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,
+    14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 1, 2, 3, 4, 5, 6]
 
 
 # 程式執行段
-def main (argv_json_location, argv_website_svg_location, argv_select_trains, move_file):
-
+def main(argv_json_location, argv_website_svg_location, argv_select_trains, move_file):
     json_files = []
     all_after_midnight_data = []
 
@@ -113,7 +114,8 @@ def main (argv_json_location, argv_website_svg_location, argv_select_trains, mov
                     all_after_midnight_data.append([key, train_id, car_class, line, over_night_stn, "midnight", value])
 
                 for key, value in list_train_time_space[2].items():
-                    all_trains_data.append(["LINE_WN", train_id, car_class, line, over_night_stn, key + train_id, value])
+                    all_trains_data.append(["LINE_WN", train_id, car_class, line,
+                                            over_night_stn, key + train_id, value])
 
             # 繪製運行圖
             dm.TimeSpaceDiagram(lines_diagram_setting,
@@ -134,6 +136,7 @@ def main (argv_json_location, argv_website_svg_location, argv_select_trains, mov
     else:
         print('無法執行！原因為沒有讀取到 JSON 檔案。\n')
 
+
 def check_output_folder(path):
     folders = ['west_link_north', 'west_link_south', 'west_link_moutain', 'west_link_sea',
                'pingtung', 'south_link', 'taitung', 'north_link', 'yilan',
@@ -147,12 +150,15 @@ def check_output_folder(path):
         for item in diff:
             os.makedirs(path + '/' + item)
 
+
 def _print_usage(name):
-    print( 'usage : ' + name + ' [-d] [-f] [-h] [-i inputfolder] [-o outputfolder] [--delete] [--force] [--help] [--inputfolder inputfolder] [--outputfolder outputfolder] [trainno ...]' )
+    print('usage : ' + name +
+          ' [-d] [-f] [-h] [-i inputfolder] [-o outputfolder] [--delete] [--force] [--help] [--inputfolder inputfolder] [--outputfolder outputfolder] [trainno ...]')
     exit()
 
+
 if __name__ == "__main__":
-    Parameters = [] # 參數集：參數1: JSON 檔位置, 參數2: 運行圖檔案存檔位置, 參數3: 特定車次繪製
+    Parameters = []  # 參數集：參數1: JSON 檔位置, 參數2: 運行圖檔案存檔位置, 參數3: 特定車次繪製
 
     print('************************************')
     print('台鐵JSON轉檔運行圖程式 - 版本：' + version)

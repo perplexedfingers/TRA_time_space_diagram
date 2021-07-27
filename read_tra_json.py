@@ -2,6 +2,8 @@ import json
 from collections import namedtuple
 
 # 讀取台鐵JSON
+
+
 def read_json(filename):
     with open('JSON/' + filename, 'r', encoding='utf8') as data_file:
         data = json.load(data_file)
@@ -24,12 +26,11 @@ def find_trains(data, select_trains):
     return trains
 
 
-
-##with open('setup.json', 'r', encoding='utf8') as data_file:
+# with open('setup.json', 'r', encoding='utf8') as data_file:
 ##    data1 = json.load(data_file)
 ##
-##print(data1)
+# print(data1)
 ##
 ##x = json.loads(data1, object_hook=lambda d: namedtuple('X', d.keys())(*d.values()))
 ##
-##print(x.Version)
+# print(x.Version)

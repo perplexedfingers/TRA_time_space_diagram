@@ -93,7 +93,7 @@ def find_passing_stations(dict_start_end_station, line, line_dir):
 
         if line_dir == '2':  # 逆行
 
-            if cheng_zhui == False:
+            if cheng_zhui is False:
                 branch = stations[station][6]
                 if branch != '':
                     if station == '7360':  # 平溪深澳線處理，瑞芳判斷
@@ -104,17 +104,17 @@ def find_passing_stations(dict_start_end_station, line, line_dir):
                             km += float(stations[station][10])
                             station = stations[station][4]
                     elif station == '3430':  # 集集線處理，二水判斷
-                        if jiji == True:
+                        if jiji is True:
                             km += float(stations[station][12])
                             station = '3431'
-                        elif jiji == False:
+                        elif jiji is False:
                             km += float(stations[station][10])
                             station = stations[station][4]
                     elif station == '4270':  # 沙崙線處理，中洲判斷
-                        if shalun == True:
+                        if shalun is True:
                             km += float(stations[station][12])
                             station = '4271'
-                        elif shalun == False:
+                        elif shalun is False:
                             km += float(stations[station][10])
                             station = stations[station][4]
                     else:
@@ -134,7 +134,7 @@ def find_passing_stations(dict_start_end_station, line, line_dir):
 
         elif line_dir == '1':  # 順行
 
-            if cheng_zhui == False:
+            if cheng_zhui is False:
                 branch = stations[station][7]
                 if branch != '':
                     if station == '0920':  # 八堵判斷
@@ -152,7 +152,7 @@ def find_passing_stations(dict_start_end_station, line, line_dir):
                             km += float(stations[station][11])
                             station = '7110'
                     elif station in ['1190', '1193']:  # 內灣六家線處理，北新竹與竹中判斷
-                        if neiwan == True:  # 終點站為六家或內灣
+                        if neiwan is True:  # 終點站為六家或內灣
                             km += float(stations[station][13])
                             if station == '1190':
                                 station = '1191'
@@ -161,14 +161,14 @@ def find_passing_stations(dict_start_end_station, line, line_dir):
                                     station = '1201'
                                 elif end_station == '1194':
                                     station = '1194'
-                        elif neiwan == False:  # 終點站非六家或內灣的車次下一車站直接指定為竹北
+                        elif neiwan is False:  # 終點站非六家或內灣的車次下一車站直接指定為竹北
                             km += float(stations[station][11])
                             station = '1180'
                     elif station == '7330':  # 平溪深澳線處理，三貂嶺判斷
                         if pingxi == True:
                             km += float(stations[station][13])
                             station = '7331'
-                        elif pingxi == False:  # 終點站非平溪深澳線的車次下一車站直接指定為牡丹
+                        elif pingxi is False:  # 終點站非平溪深澳線的車次下一車站直接指定為牡丹
                             km += float(stations[station][11])
                             station = '7320'
                     else:  # 山海線判斷
@@ -187,7 +187,7 @@ def find_passing_stations(dict_start_end_station, line, line_dir):
                 station = stations[station][9]
 
         if station == end_station:
-            if roundabout_train == True:
+            if roundabout_train is True:
                 temp.append(['1001', stations[station][1], stations[station][3], km])
                 break
             else:
@@ -195,7 +195,7 @@ def find_passing_stations(dict_start_end_station, line, line_dir):
                 break
 
         if len(temp) > 200:
-            ## print(len(temp))
+            # print(len(temp))
             break
 
     list_passing_stations = temp
@@ -273,7 +273,7 @@ def estimate_time_space(dict_start_end_station, list_passing_stations):
 
     for index, row in select_df.iterrows():
 
-        if np.isnan(row['Time']) == False:
+        if np.isnan(row['Time']) is False:
 
             if row['Time'] < last_time_value:
                 add_midnight = True
@@ -303,10 +303,10 @@ def estimate_time_space(dict_start_end_station, list_passing_stations):
     # 資料刪減整理
     drop_key = []
     for key, value in _dict_lines_operation.items():
-        if len(value) < 3: # 資料不足者直接刪除
+        if len(value) < 3:  # 資料不足者直接刪除
             drop_key.append(key)
 
-        elif key == "LINE_WM" or key == "LINE_WSEA": # 部分成追線車次出現追分或成功直達竹南的現象，將竹南車站資料刪除
+        elif key == "LINE_WM" or key == "LINE_WSEA":  # 部分成追線車次出現追分或成功直達竹南的現象，將竹南車站資料刪除
             for item in ['3350', '2260']:
                 indexes = value[(value.StationID == item) | (value.StationID == '1250')].index.tolist()
                 if len(indexes) > 2:
