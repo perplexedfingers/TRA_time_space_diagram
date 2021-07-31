@@ -23,12 +23,10 @@ Station_SEA = []
 Station_MOUNTAIN = []
 
 for item in category:
-    if item[0] == 'LINE_WSEA':
-        if item[1] not in ["1250", "3360"]:
-            Station_SEA.append(item[1])
-    if item[0] == 'LINE_WM':
-        if item[1] not in ["1250", "3360"]:
-            Station_MOUNTAIN.append(item[1])
+    if item[0] == 'LINE_WSEA' and item[1] not in ["1250", "3360"]:
+        Station_SEA.append(item[1])
+    if item[0] == 'LINE_WM' and item[1] not in ["1250", "3360"]:
+        Station_MOUNTAIN.append(item[1])
 
 
 # 找出每一個車次的表定經過車站
@@ -205,15 +203,10 @@ def find_passing_stations(dict_start_end_station, line, line_dir):
 
 # 判斷成追線車次
 def _find_cheng_zhui(list_start_end_station, start_station, end_station):
-    result = False
-
-    if list_start_end_station.__contains__('2260') and list_start_end_station.__contains__('3350'):  # 區間車，具備成功、追分二站
-        result = True
-    elif (start_station in Station_SEA and end_station in Station_MOUNTAIN) or (
-            start_station in Station_MOUNTAIN and end_station in Station_SEA):  # 區間快，起訖車站為山海線兩端車站
-        result = True
-
-    return result
+    return ('2260' in list_start_end_station and '3350' in list_start_end_station  # 區間車，具備成功、追分二站
+            )\
+            or ((start_station in Station_SEA and end_station in Station_MOUNTAIN)  # 區間快，起訖車站為山海線兩端車站
+                or (start_station in Station_MOUNTAIN and end_station in Station_SEA))
 
 
 # 推算所有通過車站的時間
