@@ -67,7 +67,7 @@ def create_schema(con: sqlite3.Connection):
             ,is_active bool DEFAULT 1
             )
             '''
-        )
+        )  # custom sqlite type
 
         con.execute(
             '''
@@ -191,7 +191,8 @@ def fill_in_routes(cur: sqlite3.Cursor, route: pathlib.Path):
             )
             cur.execute(
                 'INSERT INTO route_station (route_fk, station_fk, relative_distance) VALUES (?, ?, ?)',
-                (route_row['pk'], station_row['pk'], float(route_info['staMil']))
+                (route_row['pk'], station_row['pk'], float(route_info['staMil']) * 20)
+                # Enlarge the gap between stations
             )
         else:
             cur.execute(
@@ -200,7 +201,7 @@ def fill_in_routes(cur: sqlite3.Cursor, route: pathlib.Path):
             )
 
 
-def get_order(item):
+def get_order(item) -> int:
     return int(item['Order'])
 
 
