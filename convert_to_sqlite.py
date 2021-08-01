@@ -267,12 +267,9 @@ def fill_in_timetable(cur: sqlite3.Cursor, timetable: pathlib.Path):
 
 
 def load_data_from_json(
-    con: sqlite3.Connection, route: pathlib.Path,
+    cur: sqlite3.Cursor, route: pathlib.Path,
         station: pathlib.Path, timetable: pathlib.Path):
-    con.row_factory = sqlite3.Row
-    cur = con.cursor()
-
-    # must be this order
+    # must be in this order
     fill_in_stations(cur, station)
     fill_in_routes(cur, route)
     fill_in_timetable(cur, timetable)
@@ -299,20 +296,22 @@ def convert_bool(b: bytes) -> bool:
     return bool(b)
 
 
-def setup_sqlite(db_location: str) -> sqlite3.Connection:
+def setup_sqlite(db_location: str = ':memory:') -> sqlite3.Connection:
     sqlite3.register_adapter(timedelta, adapt_time)
     sqlite3.register_converter('time', convert_time)
     sqlite3.register_adapter(bool, adapt_bool)
     sqlite3.register_converter('bool', convert_bool)
-    con = sqlite3.connect(':memory:', detect_types=sqlite3.PARSE_DECLTYPES)
+    con = sqlite3.connect(db_location, detect_types=sqlite3.PARSE_DECLTYPES)
+    con.row_factory = sqlite3.Row
     return con
 
 
 if __name__ == '__main__':
-    con = setup_sqlite(db_location=':memory:')
+    con = setup_sqlite()
     create_schema(con)
+    cur = con.cursor()
     load_data_from_json(
-        con,
+        cur,
         pathlib.Path('./JSON/route.json'),
         pathlib.Path('./JSON/station.json'),
         pathlib.Path('./JSON/timetable.json'),

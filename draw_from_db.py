@@ -34,7 +34,8 @@ def draw_hour_lines(height: float) -> list[str]:
                 minute_x = hour_x + j * ten_minute_gap
                 # different color for every 30 minutes
                 if j != 3:
-                    result.append(f'<line x1="{minute_x}" x2="{minute_x}" y1="{PADDING}" y2="{bottom_y}" stroke="red" />')
+                    result.append(
+                        f'<line x1="{minute_x}" x2="{minute_x}" y1="{PADDING}" y2="{bottom_y}" stroke="red" />')
                 else:
                     result.append(
                         f'<line x1="{minute_x}" x2="{minute_x}" y1="{PADDING}" y2="{bottom_y}" stroke="green" />')
@@ -87,24 +88,9 @@ def svg_warpper(f):
 
 
 @svg_warpper
-def draw_background(cur: sqlite3.Cursor, height: float) -> list[str]:
+def draw_background(cur: sqlite3.Cursor) -> list[str]:
     result = []
-    result.extend(draw_hour_lines(height))
-    result.extend(draw_station_lines(cur))
-    return result
 
-
-if __name__ == '__main__':
-    con = setup_sqlite(db_location=':memory:')
-    create_schema(con)
-    load_data_from_json(
-        con,
-        pathlib.Path('./JSON/route.json'),
-        pathlib.Path('./JSON/station.json'),
-        pathlib.Path('./JSON/timetable.json'),
-    )
-
-    cur = con.cursor()
     cur.execute(
         '''
         SELECT max(route_station.relative_distance) as height
@@ -115,6 +101,8 @@ if __name__ == '__main__':
         '''
     )
     height = cur.fetchone()['height']
+    result.extend(draw_hour_lines(height))
+
     cur.execute(
         '''
         SELECT station.is_active, station_name_cht.name, route_station.relative_distance
@@ -129,6 +117,20 @@ if __name__ == '__main__':
         '''
         # GROUP BY route.name
     )
+    result.extend(draw_station_lines(cur))
+    return result
+
+
+if __name__ == '__main__':
+    con = setup_sqlite()
+    create_schema(con)
+    cur = con.cursor()
+    load_data_from_json(
+        cur,
+        pathlib.Path('./JSON/route.json'),
+        pathlib.Path('./JSON/station.json'),
+        pathlib.Path('./JSON/timetable.json'),
+    )
 
     with open('test.svg', mode='w') as f:
-        f.write(draw_background(cur, height))
+        f.write(draw_background(cur))
