@@ -64,6 +64,7 @@ def create_schema(con: sqlite3.Connection):
             (
             pk INTEGER PRIMARY KEY AUTOINCREMENT
             ,code TEXT UNIQUE NOT NULL
+            ,is_active bool DEFAULT 1
             )
             '''
         )
@@ -168,7 +169,6 @@ def fill_in_stations(cur: sqlite3.Cursor, station: pathlib.Path):
 def fill_in_routes(cur: sqlite3.Cursor, route: pathlib.Path):
     with route.open() as f:
         route_json = json.load(f)
-    breakpoint()
     for route_info in route_json:
         cur.execute(
             'INSERT OR IGNORE INTO route (name) VALUES (?)',
@@ -186,14 +186,18 @@ def fill_in_routes(cur: sqlite3.Cursor, route: pathlib.Path):
         station_row = cur.fetchone()
         if station_row:
             cur.execute(
+                'UPDATE station SET is_active=:bool WHERE pk=:pk',
+                {'pk': station_row['pk'], 'bool': True}
+            )
+            cur.execute(
                 'INSERT INTO route_station (route_fk, station_fk, relative_distance) VALUES (?, ?, ?)',
                 (route_row['pk'], station_row['pk'], float(route_info['staMil']))
             )
         else:
-            print(route_info)  # TODO
-            if 'pk' not in route_row.keys():
-                print('No such station in route information')
-            print('No such station record')
+            cur.execute(
+                'UPDATE station SET is_active=:bool WHERE code=:code',
+                {'code': route_info['fkSta'], 'bool': False}
+            )
 
 
 def get_order(item):
@@ -286,9 +290,19 @@ def convert_time(digits: bytes) -> timedelta:
     return timedelta(hours=hours, minutes=minutes, seconds=seconds)
 
 
+def adapt_bool(b: bool) -> int:
+    return int(b)
+
+
+def convert_bool(b: bytes) -> bool:
+    return bool(b)
+
+
 def setup_sqlite(db_location: str) -> sqlite3.Connection:
     sqlite3.register_adapter(timedelta, adapt_time)
     sqlite3.register_converter('time', convert_time)
+    sqlite3.register_adapter(bool, adapt_bool)
+    sqlite3.register_converter('bool', convert_bool)
     con = sqlite3.connect(':memory:', detect_types=sqlite3.PARSE_DECLTYPES)
     return con
 
