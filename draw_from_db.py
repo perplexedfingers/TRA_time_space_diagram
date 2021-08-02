@@ -10,6 +10,9 @@ from operator import itemgetter
 from convert_to_sqlite import create_schema, load_data_from_json, setup_sqlite
 
 # TODO use logging rather than print
+# TODO look and feel
+# TODO align SQL statements
+# TODO download data set utility
 
 SECOND_GAP = 0.4
 HOUR_GAP = round(3600 * SECOND_GAP)
@@ -84,13 +87,6 @@ def draw_backgrond(con: sqlite3.Connection, route_name: str, height: int, width:
     )
     result.extend(draw_station_lines(cur, width))
     return result
-
-
-def grouper(iterable, n, fillvalue=None):
-    "Collect data into fixed-length chunks or blocks"
-    # grouper('ABCDEFG', 3, 'x') --> ABC DEF Gxx"
-    args = [iter(iterable)] * n
-    return zip_longest(*args, fillvalue=fillvalue)
 
 
 def get_time_list(con: sqlite3.Connection, code: str, route_name: str) -> list[(int, float)]:
@@ -171,6 +167,13 @@ def draw(con: sqlite3.Connection, route_name: str,
 
 def from_timedelta_to_hour(t: timedelta) -> int:
     return round(t.total_seconds() // 60 // 60)
+
+
+def grouper(iterable, n, fillvalue=None):
+    "Collect data into fixed-length chunks or blocks"
+    # grouper('ABCDEFG', 3, 'x') --> ABC DEF Gxx"
+    args = [iter(iterable)] * n
+    return zip_longest(*args, fillvalue=fillvalue)
 
 
 def decide_layout(con: sqlite3.Connection, route_name: str) -> (int, int, int, int, list[str]):
