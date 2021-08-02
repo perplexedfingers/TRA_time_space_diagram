@@ -3,7 +3,9 @@ from __future__ import annotations
 import pathlib
 import sqlite3
 from datetime import timedelta
+from itertools import groupby, zip_longest
 from math import ceil
+from operator import itemgetter
 
 from convert_to_sqlite import create_schema, load_data_from_json, setup_sqlite
 
@@ -84,11 +86,20 @@ def draw_backgrond(con: sqlite3.Connection, route_name: str, height: int, width:
     return result
 
 
+def grouper(iterable, n, fillvalue=None):
+    "Collect data into fixed-length chunks or blocks"
+    # grouper('ABCDEFG', 3, 'x') --> ABC DEF Gxx"
+    args = [iter(iterable)] * n
+    return zip_longest(*args, fillvalue=fillvalue)
+
+
 def get_train_list(con: sqlite3.Connection, route_name: str) -> list[str]:
     cur = con.execute(
         '''
         SELECT
-            DISTINCT train.code
+            train.code
+            ,timetable.time AS t
+            ,station.pk AS x
         FROM train
         JOIN timetable ON
             timetable.train_fk = train.pk
@@ -98,11 +109,28 @@ def get_train_list(con: sqlite3.Connection, route_name: str) -> list[str]:
             station.pk = route_station.station_fk
         JOIN route ON
             route.pk = route_station.route_fk
-        WHERE route.name = ?
+        WHERE
+            route.name = ?
+        GROUP BY
+            train.code
+        HAVING
+            COUNT(timetable.pk) > 2
+        ORDER BY
+            train.code
+            ,timetable.time ASC
         ''',
         (route_name,)
     )
-    return [row['code'] for row in cur.fetchall()]
+    result = []
+    maximum = timedelta(hours=4)  # exceptioally long travel/stop time
+    # Try to exclude train '145' in south bound and residue point of time when transfering/passing between lines
+    # TODO
+    for code, items in groupby(cur.fetchall(), key=itemgetter('code')):
+        if any((b['t'] - a['t'] > maximum for a, b in grouper(items, 2, fillvalue={'t': timedelta()}))):
+            continue
+
+        result.append(code)
+    return result
 
 
 def get_time_list(con: sqlite3.Connection, code: str, route_name: str) -> list[(int, float)]:
@@ -132,7 +160,7 @@ def get_time_list(con: sqlite3.Connection, code: str, route_name: str) -> list[(
     return [(r['x'], r['y']) for r in cur.fetchall()]
 
 
-def draw_train_lines(con: sqlite3.Connection, start_hour: int, train_list: list[str], route_name: str) -> list[str]:
+def draw_train_lines(con: sqlite3.Connection, start_hour: int, train_list: tuple[str], route_name: str) -> list[str]:
     result = []
     x_offset = timedelta(hours=start_hour)
     print(f'{len(train_list)} trains to process in "{route_name}"')
@@ -201,38 +229,33 @@ def decide_layout(con: sqlite3.Connection, route_name: str) -> (int, int, int, i
 
     cur = con.execute(
         '''
-        SELECT min(timetable.time) as early
-        FROM timetable
+        SELECT
+            min(timetable.time) as early
+            ,max(timetable.time) as late
+            ,train.code
+        FROM
+            timetable
         JOIN station ON
             timetable.station_fk = station.pk
         JOIN route_station ON
             route_station.station_fk = station.pk
         JOIN route ON
             route.pk = route_station.route_fk
+        JOIN train ON
+            timetable.train_fk = train.pk
         WHERE
             route.name = ?
+        GROUP BY
+            train.code
+        HAVING
+            COUNT(timetable.pk) > 2
         ''',
         (route_name,)
     )
-    start_time = cur.fetchone()['early']
+    times = tuple((r['early'], r['late']) for r in cur.fetchall())
+    start_time = min(times, key=itemgetter(0))[0]
     start_hour = from_timedelta_to_hour(start_time)
-
-    cur = con.execute(
-        '''
-        SELECT max(timetable.time) as late
-        FROM timetable
-        JOIN station ON
-            timetable.station_fk = station.pk
-        JOIN route_station ON
-            route_station.station_fk = station.pk
-        JOIN route ON
-            route.pk = route_station.route_fk
-        WHERE
-            route.name = ?
-        ''',
-        (route_name,)
-    )
-    end_time = cur.fetchone()['late']
+    end_time = max(times, key=itemgetter(1))[1]
     end_hour = from_timedelta_to_hour(end_time) + 1
 
     hour_count = end_hour - start_hour + 1
@@ -241,7 +264,6 @@ def decide_layout(con: sqlite3.Connection, route_name: str) -> (int, int, int, i
 
 
 def get_route_names(con: sqlite3.Connection):
-    # TODO exclue route that has no station or train
     cur = con.execute(
         '''
         SELECT
