@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 import json
 import pathlib
 import sqlite3
 from datetime import timedelta
 from itertools import groupby
 from operator import itemgetter
+from typing import Union
 
 NEXT_DAY = timedelta(days=1)
 
@@ -117,7 +120,7 @@ def create_schema(con: sqlite3.Connection):
         ,train_fk REFERENCES train ON DELETE CASCADE
         ,previous REFERENCE timetable NULL
         ,next REFERENCE timetable NULL
-        ,time time NOT NULL
+        ,time t_time NOT NULL
         );
         '''
     )
@@ -132,7 +135,7 @@ def fill_in_stations(cur: sqlite3.Cursor, station: pathlib.Path):
             (station['stationCode'],)
         )
         station_pk = cur.fetchone()['pk']
-        con.execute(
+        cur.execute(
             'INSERT INTO station_name_cht (station_fk, name) VALUES (:pk, :name)',
             {'pk': station_pk, 'name': station['name']}
         )
@@ -248,7 +251,11 @@ def adapt_time(t: timedelta) -> int:
     return round(t.total_seconds())
 
 
-def convert_time(digits: bytes) -> timedelta:
+def convert_time(digits: Union[int, bytes]) -> timedelta:
+    # seconds = int(digits) % 60
+    # minutes = int(digits) // 60 % 60
+    # hours = int(digits) // 60 // 60
+    # return timedelta(hours=hours, minutes=minutes, seconds=seconds)
     return timedelta(seconds=int(digits))
 
 
@@ -262,7 +269,7 @@ def convert_bool(b: bytes) -> bool:
 
 def setup_sqlite(db_location: str = ':memory:') -> sqlite3.Connection:
     sqlite3.register_adapter(timedelta, adapt_time)
-    sqlite3.register_converter('time', convert_time)
+    sqlite3.register_converter('t_time', convert_time)
     sqlite3.register_adapter(bool, adapt_bool)
     sqlite3.register_converter('bool', convert_bool)
     con = sqlite3.connect(db_location, detect_types=sqlite3.PARSE_DECLTYPES)
@@ -272,11 +279,11 @@ def setup_sqlite(db_location: str = ':memory:') -> sqlite3.Connection:
 
 if __name__ == '__main__':
     con = setup_sqlite()
-    create_schema(con)
-    load_data_from_json(
-        con,
-        pathlib.Path('./JSON/route.json'),
-        pathlib.Path('./JSON/station.json'),
-        pathlib.Path('./JSON/timetable.json'),
-    )
-    breakpoint()
+    with con:
+        create_schema(con)
+        load_data_from_json(
+            con,
+            pathlib.Path('./JSON/route.json'),
+            pathlib.Path('./JSON/station.json'),
+            pathlib.Path('./JSON/timetable.json'),
+        )

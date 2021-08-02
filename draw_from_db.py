@@ -2,34 +2,33 @@ from __future__ import annotations
 
 import pathlib
 import sqlite3
-from functools import wraps
+from datetime import timedelta
 from math import ceil
 
 from convert_to_sqlite import create_schema, load_data_from_json, setup_sqlite
 
-HOURS = [h for h in range(31)]
-HOUR_GAP = 1200
+SECOND_GAP = 1
+HOUR_GAP = 3600 * SECOND_GAP
 PADDING = 50
-WIDTH = 36100  # HOUR_GAP * (len(HOURS) - 1) + 2 * PADDING
-TEXT_GAP = 500
 
 
-def draw_hour_lines(height: float) -> list[str]:
-    ten_minute_gap = HOUR_GAP / 6  # There are 6 ten minutes in an hour
+def draw_hour_lines(height: int, width: int, hours: list[int]) -> list[str]:
     bottom_y = PADDING + height
+    text_gap = height // 7  # gap between vertical text TODO should relate with 'viewport'
+    ten_minute_gap = 60 * 10 * SECOND_GAP
 
     result = []
-    for i, hour in enumerate(HOURS):
+    for i, hour in enumerate(hours):
         # lines for every hour
         hour_x = PADDING + i * HOUR_GAP
         result.append(f'<line x1="{hour_x}" x2="{hour_x}" y1="{PADDING}" y2="{bottom_y}" stroke="yellow" />')
 
         # text for every hour, goes down vertically along the hour line
-        for j in range(0, ceil(height + TEXT_GAP), TEXT_GAP):
+        for j in range(0, ceil(height + text_gap), text_gap):
             result.append(f'<text fill="black" x="{hour_x}" y="{PADDING - 1 + j}">{"{:0>2d}00".format(hour)}</text>')
 
         # lines for every 10 minutes
-        if i + 1 != len(HOURS):
+        if i + 1 != len(hours):
             for j in range(1, 6):
                 minute_x = hour_x + j * ten_minute_gap
                 # different color for every 30 minutes
@@ -41,7 +40,7 @@ def draw_hour_lines(height: float) -> list[str]:
                         f'<line x1="{minute_x}" x2="{minute_x}" y1="{PADDING}" y2="{bottom_y}" stroke="green" />')
 
                 # text for every 10 minutes. goes down vertically along the minute line
-                for k in range(0, ceil(height + TEXT_GAP), TEXT_GAP):
+                for k in range(0, ceil(height + text_gap), text_gap):
                     if j != 3:
                         result.append(f'<text fill="grey" x="{minute_x}" y="{PADDING - 1 + k}">{j}0</text>')
                     else:
@@ -49,7 +48,7 @@ def draw_hour_lines(height: float) -> list[str]:
     return result
 
 
-def draw_station_lines(cur: sqlite3.Cursor) -> list[str]:
+def draw_station_lines(cur: sqlite3.Cursor, width: int) -> list[str]:
     result = []
     stations = cur.fetchmany()
     while stations:
@@ -57,12 +56,12 @@ def draw_station_lines(cur: sqlite3.Cursor) -> list[str]:
             y = row['relative_distance'] + PADDING
             # lines for every station
             if row['is_active']:
-                result.append(f'<line x1="{PADDING}" x2="{WIDTH - PADDING}" y1="{y}" y2="{y}" stroke="black" />')
+                result.append(f'<line x1="{PADDING}" x2="{width - PADDING}" y1="{y}" y2="{y}" stroke="black" />')
             else:
-                result.append(f'<line x1="{PADDING}" x2="{WIDTH - PADDING}" y1="{y}" y2="{y}" stroke="grey" />')
+                result.append(f'<line x1="{PADDING}" x2="{width - PADDING}" y1="{y}" y2="{y}" stroke="grey" />')
 
             # text for every station. goes right horiziontally along the station line
-            for i in range(0, WIDTH + HOUR_GAP, HOUR_GAP):
+            for i in range(0, width + HOUR_GAP, HOUR_GAP):
                 if row['is_active']:
                     result.append(f'<text fill="black" x="{i}" y="{y - 5}">{row["name"]}</text>')
                 else:
@@ -71,39 +70,31 @@ def draw_station_lines(cur: sqlite3.Cursor) -> list[str]:
     return result
 
 
-def svg_warpper(f):
-    @wraps(f)
-    def wrapper(cur: sqlite3.Cursor, height: float, *args, **kw) -> str:
-        result = [
-            '<?xml version="1.0" encoding="utf-8" ?>',
-            '<?xml-stylesheet href="style.css" type="text/css" title="sometext" alternate="no" media="screen"?>',
-            f'<svg xmlns="http://www.w3.org/2000/svg" style="font-family:Tahoma" width="{WIDTH}" height="{height + 100}">',
-        ]
-
-        result.extend(f(cur=cur, height=height, *args, **kw))
-
-        result.append('</svg>')
-        return '\n'.join(result)
-    return wrapper
-
-
-@svg_warpper
-def draw_background(cur: sqlite3.Cursor) -> list[str]:
+def draw_train_lines(cur: sqlite3.Cursor, start_hour: int) -> list[str]:
     result = []
+    stations = cur.fetchmany()
+    # code, relative_distance, time
+    x_offset = start_hour * 3600
+    path = []
+    while stations:
+        for station in stations:
+            path.append(
+                f"{(station['time'].total_seconds() - x_offset) * SECOND_GAP},{station['relative_distance'] + PADDING}"
+            )
+            path.extend([
+                f'<text><textPath stroke="black" startOffset = "{PADDING + 600 * i}"><tspan dy="-3">{station["code"]}</tspan></textPath></text>'
+                for i in range(0, 6)  # 600?
+            ])
+        stations = cur.fetchmany()
+    result.extend(path)
+    return result
 
-    cur.execute(
-        '''
-        SELECT max(route_station.relative_distance) as height
-        FROM route_station
-        JOIN route ON
-            route.pk = route_station.route_fk
-        WHERE route.name = "西部幹線"
-        '''
-    )
-    height = cur.fetchone()['height']
-    result.extend(draw_hour_lines(height))
 
-    cur.execute(
+def draw_backgrond(con: sqlite3.Connection, route_name: str, height: int, width: int, hours: list[int]):
+    result = []
+    result.extend(draw_hour_lines(height, width, hours))
+
+    cur = con.execute(
         '''
         SELECT station.is_active, station_name_cht.name, route_station.relative_distance
         FROM station
@@ -113,24 +104,122 @@ def draw_background(cur: sqlite3.Cursor) -> list[str]:
             station.pk = route_station.station_fk
         JOIN route ON
             route.pk = route_station.route_fk
-        WHERE route.name = "西部幹線"
-        '''
-        # GROUP BY route.name
+        WHERE route.name = ?
+        ''',
+        (route_name,)
     )
-    result.extend(draw_station_lines(cur))
+    result.extend(draw_station_lines(cur, width))
     return result
 
 
-if __name__ == '__main__':
-    con = setup_sqlite()
-    create_schema(con)
-    cur = con.cursor()
-    load_data_from_json(
-        cur,
-        pathlib.Path('./JSON/route.json'),
-        pathlib.Path('./JSON/station.json'),
-        pathlib.Path('./JSON/timetable.json'),
-    )
+def draw(con: sqlite3.Connection, route_name: str, height: int, width: int, hours: list[int]) -> list[str]:
+    result = [
+        '<?xml version="1.0" encoding="utf-8" ?>',
+        f'<svg xmlns="http://www.w3.org/2000/svg" style="font-family:Tahoma" width="{width}" height="{height + 2 * PADDING}">',
+    ]
 
-    with open('test.svg', mode='w') as f:
-        f.write(draw_background(cur))
+    result.extend(draw_backgrond(con, route_name, height, width, hours))
+
+    # cur = con.execute(
+    #     '''
+    #     SELECT
+    #         train.code, route_station.relative_distance,
+    #         timetable.time
+    #     FROM timetable
+    #     JOIN station ON
+    #         timetable.station_fk = station.pk
+    #     JOIN route_station ON
+    #         station.pk = route_station.station_fk
+    #     JOIN train ON
+    #         timetable.train_fk = train.pk
+    #     JOIN route ON
+    #         route.pk = route_station.route_fk
+    #     WHERE route.name = ?
+    #     ORDER BY
+    #         train.code, timetable.time ASC
+    #     ''',
+    #     (route_name,)
+    # )
+    # result.extend(draw_train_lines(cur, start_hour=hours[0]))
+
+    result.append('</svg>')
+    return '\n'.join(result)
+
+
+def from_timedelta_to_hour(t: timedelta) -> int:
+    return t // 60 // 60
+
+
+def decide_layout(con: sqlite3.Connection, route_name: str) -> (int, int, list[int]):
+    cur = con.execute(
+        '''
+        SELECT max(route_station.relative_distance) as height
+        FROM route_station
+        JOIN route ON
+            route.pk = route_station.route_fk
+        WHERE route.name = ?
+        ''',
+        (route_name,)
+    )
+    height = round(cur.fetchone()['height'])
+
+    cur = con.execute(
+        '''
+        SELECT min(timetable.time) as early
+        FROM timetable
+        JOIN station ON
+            timetable.station_fk = station.pk
+        JOIN route_station ON
+            route_station.station_fk = station.pk
+        JOIN route ON
+            route.pk = route_station.route_fk
+        WHERE
+            route.name = ?
+        AND
+            timetable.previous IS NULL
+        ''',
+        (route_name,)
+    )
+    earliest_time = cur.fetchone()['early']
+    earliest_hour = from_timedelta_to_hour(earliest_time)
+
+    cur = con.execute(
+        '''
+        SELECT max(timetable.time) as late
+        FROM timetable
+        JOIN station ON
+            timetable.station_fk = station.pk
+        JOIN route_station ON
+            route_station.station_fk = station.pk
+        JOIN route ON
+            route.pk = route_station.route_fk
+        WHERE
+            route.name = ?
+        AND
+            timetable.next IS NULL
+        ''',
+        (route_name,)
+    )
+    latest_time = cur.fetchone()['late']
+    latest_hour = from_timedelta_to_hour(latest_time) + 1
+
+    hours = tuple(i for i in range(earliest_hour, latest_hour + 1))
+    width = (len(hours) - 1) * HOUR_GAP + 2 * PADDING
+    return height, width, hours
+
+
+if __name__ == '__main__':
+    route_name = '西部幹線'
+    con = setup_sqlite()
+    with con:
+        create_schema(con)
+        load_data_from_json(
+            con,
+            pathlib.Path('./JSON/route.json'),
+            pathlib.Path('./JSON/station.json'),
+            pathlib.Path('./JSON/timetable.json'),
+        )
+        height, width, hours = decide_layout(con, route_name=route_name)
+
+        with open('test.svg', mode='w') as f:
+            f.write(draw(con=con, route_name=route_name, height=height, width=width, hours=hours))
