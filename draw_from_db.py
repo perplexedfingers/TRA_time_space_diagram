@@ -3,11 +3,13 @@ from __future__ import annotations
 import pathlib
 import sqlite3
 from datetime import timedelta
+from itertools import groupby
 from math import ceil
+from operator import itemgetter
 
 from convert_to_sqlite import create_schema, load_data_from_json, setup_sqlite
 
-SECOND_GAP = 0.1
+SECOND_GAP = 0.4
 HOUR_GAP = round(3600 * SECOND_GAP)
 PADDING = 50
 
@@ -41,9 +43,10 @@ def draw_hour_lines(height: int, width: int, start_hour: int, hour_count: int) -
 
 def draw_station_lines(cur: sqlite3.Cursor, width: int) -> list[str]:
     result = []
+    cur.arraysize = 10  # random number
     stations = cur.fetchmany()
     while stations:
-        station_y = [(s['is_active'], s['relative_distance'] + PADDING, s['name']) for s in stations]
+        station_y = [(s['is_active'], s['y'] + PADDING, s['name']) for s in stations]
         for is_active, y, name in station_y:
             if is_active:
                 result.append(f'<line x1="{PADDING}" x2="{width - PADDING}" y1="{y}" y2="{y}" stroke="black" />')
@@ -58,33 +61,13 @@ def draw_station_lines(cur: sqlite3.Cursor, width: int) -> list[str]:
     return result
 
 
-def draw_train_lines(cur: sqlite3.Cursor, start_hour: int) -> list[str]:
-    result = []
-    stations = cur.fetchmany()
-    # code, relative_distance, time
-    x_offset = start_hour * 3600
-    path = []
-    while stations:
-        for station in stations:
-            path.append(
-                f"{round((station['time'].total_seconds() - x_offset) * SECOND_GAP)},{station['relative_distance'] + PADDING}"
-            )
-            path.extend([
-                f'<text><textPath stroke="black" startOffset = "{PADDING + 600 * i}"><tspan dy="-3">{station["code"]}</tspan></textPath></text>'
-                for i in range(0, 6)  # 600?
-            ])
-        stations = cur.fetchmany()
-    result.extend(path)
-    return result
-
-
 def draw_backgrond(con: sqlite3.Connection, route_name: str, height: int, width: int, start_hour: int, hour_count: int):
     result = []
     result.extend(draw_hour_lines(height, width, start_hour, hour_count))
 
     cur = con.execute(
         '''
-        SELECT station.is_active, station_name_cht.name, route_station.relative_distance
+        SELECT station.is_active, station_name_cht.name, route_station.relative_distance AS y
         FROM station
         JOIN station_name_cht ON
             station.pk = station_name_cht.station_fk
@@ -100,35 +83,87 @@ def draw_backgrond(con: sqlite3.Connection, route_name: str, height: int, width:
     return result
 
 
+def get_train_list(con: sqlite3.Connection, route_name: str) -> list[str]:
+    cur = con.execute(
+        '''
+        SELECT
+            DISTINCT train.code
+        FROM train
+        JOIN timetable ON
+            timetable.train_fk = train.pk
+        JOIN station ON
+            timetable.station_fk = station.pk
+        JOIN route_station ON
+            station.pk = route_station.station_fk
+        JOIN route ON
+            route.pk = route_station.route_fk
+        WHERE route.name = ?
+        ''',
+        (route_name,)
+    )
+    return [row['code'] for row in cur.fetchall()]
+
+
+def get_time_list(con: sqlite3.Connection, code: str, route_name: str) -> list[(int, float)]:
+    cur = con.execute(
+        '''
+        SELECT
+            timetable.time AS x
+            ,route_station.relative_distance AS y
+        FROM timetable
+        JOIN station ON
+            timetable.station_fk = station.pk
+        JOIN route_station ON
+            station.pk = route_station.station_fk
+        JOIN train ON
+            timetable.train_fk = train.pk
+        JOIN route ON
+            route.pk = route_station.route_fk
+        WHERE
+            route.name = :name
+            AND
+            train.code = :code
+        ORDER BY
+            timetable.time ASC
+        ''',
+        {'code': code, 'name': route_name}
+    )
+    return [(r['x'], r['y']) for r in cur.fetchall()]
+
+
+def draw_train_lines(con: sqlite3.Connection, start_hour: int, train_list: list[str], route_name: str) -> list[str]:
+    result = []
+    x_offset = timedelta(hours=start_hour)
+    print(f'{len(train_list)} trains to process in "{route_name}"')
+    for i, code in enumerate(train_list):
+        time_list = get_time_list(con, code, route_name)
+        d = ' '.join((f'{round((x - x_offset).total_seconds() * SECOND_GAP) + PADDING},{y + PADDING}' for x, y in time_list))
+        result.append(f'<path id="{code}" d="M {d}" stroke="black" stroke-width="2" fill="none"></path>')
+        result.extend([
+            f'<text><textPath stroke="black" startOffset="{PADDING + 600 * i}" xlink:href="#{code}"><tspan dy="-3">{code}</tspan></textPath></text>'
+            for i in range(0, 6)  # 600?
+        ])
+        print(f'{i} / {len(train_list)}', end='\r')
+    print(f'Finish "{route_name}"')
+    return result
+
+
 def draw(con: sqlite3.Connection, route_name: str, height: int, width: int, start_hour: int, hour_count: int) -> list[str]:
     result = [
-        '<?xml version="1.0" encoding="utf-8" ?>',
-        f'<svg xmlns="http://www.w3.org/2000/svg" style="font-family:Tahoma" width="{width}" height="{height + 2 * PADDING}">',
+        # '<?xml version="1.0" encoding="utf-8" ?>',
+        f'''<svg
+        xmlns="http://www.w3.org/2000/svg"
+        xmlns:xlink="http://www.w3.org/1999/xlink"
+        style="font-family:Tahoma"
+        width="{width}"
+        height="{height + 2 * PADDING}">
+        ''',
     ]
 
     result.extend(draw_backgrond(con, route_name, height, width, start_hour, hour_count))
 
-    # cur = con.execute(
-    #     '''
-    #     SELECT
-    #         train.code, route_station.relative_distance,
-    #         timetable.time
-    #     FROM timetable
-    #     JOIN station ON
-    #         timetable.station_fk = station.pk
-    #     JOIN route_station ON
-    #         station.pk = route_station.station_fk
-    #     JOIN train ON
-    #         timetable.train_fk = train.pk
-    #     JOIN route ON
-    #         route.pk = route_station.route_fk
-    #     WHERE route.name = ?
-    #     ORDER BY
-    #         train.code, timetable.time ASC
-    #     ''',
-    #     (route_name,)
-    # )
-    # result.extend(draw_train_lines(cur, start_hour=hours[0]))
+    train_list = get_train_list(con, route_name)
+    result.extend(draw_train_lines(con, start_hour=start_hour, train_list=train_list, route_name=route_name))
 
     result.append('</svg>')
     return '\n'.join(result)
