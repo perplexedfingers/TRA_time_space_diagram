@@ -43,20 +43,17 @@ def draw_station_lines(cur: sqlite3.Cursor, width: int) -> list[str]:
     result = []
     stations = cur.fetchmany()
     while stations:
-        for row in stations:
-            y = row['relative_distance'] + PADDING
-            # lines for every station
-            if row['is_active']:
+        station_y = [(s['is_active'], s['relative_distance'] + PADDING, s['name']) for s in stations]
+        for is_active, y, name in station_y:
+            if is_active:
                 result.append(f'<line x1="{PADDING}" x2="{width - PADDING}" y1="{y}" y2="{y}" stroke="black" />')
             else:
                 result.append(f'<line x1="{PADDING}" x2="{width - PADDING}" y1="{y}" y2="{y}" stroke="grey" />')
-
-            # text for every station. goes right horiziontally along the station line
-            for i in range(0, width + HOUR_GAP, HOUR_GAP):
-                if row['is_active']:
-                    result.append(f'<text fill="black" x="{i}" y="{y - 5}">{row["name"]}</text>')
+            for i in range(0, width, HOUR_GAP):
+                if is_active:
+                    result.append(f'<text fill="black" x="{i}" y="{y - 5}">{name}</text>')
                 else:
-                    result.append(f'<text fill="grey" x="{i}" y="{y - 5}">{row["name"]}</text>')
+                    result.append(f'<text fill="grey" x="{i}" y="{y - 5}">{name}</text>')
         stations = cur.fetchmany()
     return result
 
