@@ -2,6 +2,8 @@ import json
 import pathlib
 import sqlite3
 from datetime import timedelta
+from itertools import groupby
+from operator import itemgetter
 
 NEXT_DAY = timedelta(days=1)
 
@@ -57,95 +59,68 @@ CAR_CLASS = {  # copy from developer manual
 
 
 def create_schema(con: sqlite3.Connection):
-    with con:
-        con.execute(
-            '''
-            CREATE TABLE IF NOT EXISTS station
-            (
-            pk INTEGER PRIMARY KEY AUTOINCREMENT
-            ,code TEXT UNIQUE NOT NULL
-            ,is_active bool DEFAULT 1
-            )
-            '''
-        )  # custom sqlite type
+    cur = con.cursor()
+    cur.executescript(
+        '''
+        CREATE TABLE IF NOT EXISTS station
+        (
+        pk INTEGER PRIMARY KEY AUTOINCREMENT
+        ,code TEXT UNIQUE NOT NULL
+        ,is_active bool DEFAULT 0
+        );
 
-        con.execute(
-            '''
-            CREATE TABLE IF NOT EXISTS station_name_cht
-            (
-            pk INTEGER PRIMARY KEY AUTOINCREMENT
-            ,station_fk REFERENCES station ON DELETE CASCADE
-            ,name TEXT NOT NULL
-            )
-            '''
-        )
+        CREATE TABLE IF NOT EXISTS station_name_cht
+        (
+        pk INTEGER PRIMARY KEY AUTOINCREMENT
+        ,station_fk REFERENCES station ON DELETE CASCADE
+        ,name TEXT NOT NULL
+        );
 
-        con.execute(
-            '''
-            CREATE TABLE IF NOT EXISTS route
-            (
-            pk INTEGER PRIMARY KEY AUTOINCREMENT
-            ,name TEXT NOT NULL UNIQUE
-            )
-            '''
-        )
+        CREATE TABLE IF NOT EXISTS route
+        (
+        pk INTEGER PRIMARY KEY AUTOINCREMENT
+        ,name TEXT NOT NULL UNIQUE
+        );
 
-        con.execute(
-            '''
-            CREATE TABLE IF NOT EXISTS route_station
-            (
-            pk INTEGER PRIMARY KEY AUTOINCREMENT
-            ,route_fk REFERENCES route ON DELETE CASCADE
-            ,station_fk REFERENCES station ON DELETE CASCADE
-            ,relative_distance REAL NOT NULL
-            )
-            '''
-        )
+        CREATE TABLE IF NOT EXISTS route_station
+        (
+        pk INTEGER PRIMARY KEY AUTOINCREMENT
+        ,route_fk REFERENCES route ON DELETE CASCADE
+        ,station_fk REFERENCES station ON DELETE CASCADE
+        ,relative_distance REAL NOT NULL
+        );
 
-        con.execute(
-            '''
-            CREATE TABLE IF NOT EXISTS train_type
-            (
-            pk INTEGER PRIMARY KEY AUTOINCREMENT
-            ,code TEXT UNIQUE NOT NULL
-            )
-            '''
-        )
+        CREATE TABLE IF NOT EXISTS train_type
+        (
+        pk INTEGER PRIMARY KEY AUTOINCREMENT
+        ,code TEXT UNIQUE NOT NULL
+        );
 
-        con.execute(
-            '''
-            CREATE TABLE IF NOT EXISTS train_type_name_cht
-            (
-            pk INTEGER PRIMARY KEY AUTOINCREMENT
-            ,train_type_fk REFERENCES train_type ON DELETE CASCADE
-            ,name TEXT NOT NULL
-            )
-            '''
-        )
+        CREATE TABLE IF NOT EXISTS train_type_name_cht
+        (
+        pk INTEGER PRIMARY KEY AUTOINCREMENT
+        ,train_type_fk REFERENCES train_type ON DELETE CASCADE
+        ,name TEXT NOT NULL
+        );
 
-        con.execute(
-            '''
-            CREATE TABLE IF NOT EXISTS train
-            (
-            pk INTEGER PRIMARY KEY AUTOINCREMENT
-            ,train_type_fk REFERENCES train_type ON DELETE CASCADE
-            ,code TEXT NOT NULL
-            )
-            '''
-        )
+        CREATE TABLE IF NOT EXISTS train
+        (
+        pk INTEGER PRIMARY KEY AUTOINCREMENT
+        ,train_type_fk REFERENCES train_type ON DELETE CASCADE
+        ,code TEXT NOT NULL
+        );
 
-        con.execute(
-            '''
-            CREATE TABLE IF NOT EXISTS timetable
-            (
-            pk INTEGER PRIMARY KEY AUTOINCREMENT
-            ,station_fk REFERENCES train_type ON DELETE CASCADE
-            ,train_fk REFERENCES train ON DELETE CASCADE
-            ,arrive_time time NOT NULL
-            ,departure_time time NOT NULL
-            )
-            '''
-        )  # custom sqlite type
+        CREATE TABLE IF NOT EXISTS timetable
+        (
+        pk INTEGER PRIMARY KEY AUTOINCREMENT
+        ,station_fk REFERENCES train_type ON DELETE CASCADE
+        ,train_fk REFERENCES train ON DELETE CASCADE
+        ,previous REFERENCE timetable NULL
+        ,next REFERENCE timetable NULL
+        ,time time NOT NULL
+        );
+        '''
+    )
 
 
 def fill_in_stations(cur: sqlite3.Cursor, station: pathlib.Path):
@@ -153,52 +128,48 @@ def fill_in_stations(cur: sqlite3.Cursor, station: pathlib.Path):
         station_json = json.load(f)
     for station in station_json:
         cur.execute(
-            'INSERT INTO station (code) VALUES (?)',
+            'INSERT INTO station (code) VALUES (?) RETURNING pk',
             (station['stationCode'],)
         )
-        cur.execute(
-            'SELECT pk FROM station WHERE code=:code',
-            {'code': station['stationCode']})
-        station_row = cur.fetchone()
-        cur.execute(
-            'INSERT INTO station_name_cht (station_fk, name) VALUES (?, ?)',
-            (station_row['pk'], station['name'])
+        station_pk = cur.fetchone()['pk']
+        con.execute(
+            'INSERT INTO station_name_cht (station_fk, name) VALUES (:pk, :name)',
+            {'pk': station_pk, 'name': station['name']}
         )
 
 
 def fill_in_routes(cur: sqlite3.Cursor, route: pathlib.Path):
     with route.open() as f:
         route_json = json.load(f)
-    for route_info in route_json:
+    for line_name, routes in groupby(sorted(route_json, key=itemgetter('lineName')), key=itemgetter('lineName')):
         cur.execute(
-            'INSERT OR IGNORE INTO route (name) VALUES (?)',
-            (route_info['lineName'],)
+            'INSERT INTO route (name) VALUES (?) RETURNING route.pk',
+            (line_name,)
         )
-        cur.execute(
-            'SELECT pk FROM route WHERE name=:name',
-            {'name': route_info['lineName']}
-        )
-        route_row = cur.fetchone()
-        cur.execute(
-            'SELECT pk FROM station WHERE code=:code',
-            {'code': route_info['fkSta']}
-        )
-        station_row = cur.fetchone()
-        if station_row:
+        route_pk = cur.fetchone()['pk']
+        for route_info in routes:
             cur.execute(
-                'UPDATE station SET is_active=:bool WHERE pk=:pk',
-                {'pk': station_row['pk'], 'bool': True}
+                'SELECT pk FROM station WHERE code=?',
+                (route_info['fkSta'],)
             )
-            cur.execute(
-                'INSERT INTO route_station (route_fk, station_fk, relative_distance) VALUES (?, ?, ?)',
-                (route_row['pk'], station_row['pk'], float(route_info['staMil']) * 20)
-                # Enlarge the gap between stations
-            )
-        else:
-            cur.execute(
-                'UPDATE station SET is_active=:bool WHERE code=:code',
-                {'code': route_info['fkSta'], 'bool': False}
-            )
+            station_row = cur.fetchone()
+            if station_row:
+                station_pk = station_row['pk']
+                cur.execute(
+                    'UPDATE station SET is_active=:bool WHERE pk=:pk',
+                    {'pk': station_pk, 'bool': True}
+                )
+                cur.execute(
+                    '''
+                    INSERT INTO route_station
+                    (route_fk, station_fk, relative_distance)
+                    VALUES
+                    (:route_pk, :station_pk, :distance)
+                    ''',
+                    {'route_pk': route_pk, 'station_pk': station_pk,
+                     'distance': float(route_info['staMil']) * 20}
+                    # Enlarge the gap between stations
+                )
 
 
 def get_order(item) -> int:
@@ -213,63 +184,61 @@ def iso_time_to_timedelta(iso: str) -> timedelta:
 def fill_in_timetable(cur: sqlite3.Cursor, timetable: pathlib.Path):
     with timetable.open() as f:
         timetable_json = json.load(f)
-    for train in timetable_json['TrainInfos']:
+    for train_type, trains in groupby(
+            sorted(timetable_json['TrainInfos'],
+                   key=itemgetter('CarClass')),
+            key=itemgetter('CarClass')):
         cur.execute(
-            'INSERT OR IGNORE INTO train_type (code) VALUES (?)',
-            (train['CarClass'],)
+            'INSERT INTO train_type (code) VALUES (?) RETURNING train_type.pk',
+            (train_type,)
         )
+        train_type_pk = cur.fetchone()['pk']
         cur.execute(
-            'SELECT pk FROM train_type WHERE code=:code',
-            {'code': train['CarClass']}
+            'INSERT INTO train_type_name_cht (train_type_fk, name) VALUES (:train_type_pk, :name)',
+            {'train_type_pk': train_type_pk, 'name': CAR_CLASS[train_type]}
         )
-        train_type_row = cur.fetchone()
-        cur.execute(
-            'INSERT OR IGNORE INTO train_type_name_cht (train_type_fk, name) VALUES (?, ?)',
-            (train_type_row['pk'], CAR_CLASS[train['CarClass']])
-        )
-        cur.execute(
-            'INSERT OR IGNORE INTO train (train_type_fk, code) VALUES (?, ?)',
-            (train_type_row['pk'], train['Train'])
-        )
-        cur.execute(
-            'SELECT pk FROM train WHERE code=:code',
-            {'code': train['Train']}
-        )
-        train_row = cur.fetchone()
-        is_overnight = len(train['OverNightStn']) > 0
-        start_time = None
-        sql_statement = 'INSERT INTO timetable (station_fk, train_fk, arrive_time, departure_time) VALUES (?, ?, ?, ?)'
-        for time_info in sorted(train['TimeInfos'], key=get_order):
-            arrive_time = iso_time_to_timedelta(time_info['ARRTime'])
-            departure_time = iso_time_to_timedelta(time_info['DEPTime'])
+        for train in trains:
             cur.execute(
-                'SELECT pk FROM station WHERE code=:code',
-                {'code': time_info['Station']})
-            station_row = cur.fetchone()
-            if is_overnight:
-                if start_time is None:
-                    start_time = arrive_time
-                elif start_time > arrive_time:
-                    cur.execute(
-                        sql_statement,
-                        (station_row['pk'], train_row['pk'],
-                         arrive_time + NEXT_DAY,
-                         departure_time + NEXT_DAY
-                         )
-                    )
-            cur.execute(
-                sql_statement,
-                (station_row['pk'], train_row['pk'],
-                 arrive_time,
-                 departure_time
-                 )
+                'INSERT OR IGNORE INTO train (train_type_fk, code) VALUES (:train_type_pk, :code) RETURNING train.pk',
+                {'train_type_pk': train_type_pk, 'code': train['Train']}
             )
+            train_pk = cur.fetchone()['pk']
+            over_night_station = train['OverNightStn']
+            previous = None
+            start_over_night_route = False
+            for time_info in sorted(train['TimeInfos'], key=get_order):
+                station_code = time_info['Station']
+                cur.execute(
+                    'SELECT pk FROM station WHERE code=?',
+                    (station_code,))
+                station_pk = cur.fetchone()['pk']
+                for key in ('ARRTime', 'DEPTime'):
+                    time_ = iso_time_to_timedelta(time_info[key])
+                    if start_over_night_route or station_code in over_night_station:
+                        time_ += NEXT_DAY
+                        start_over_night_route = True
+                    cur.execute(
+                        '''INSERT INTO timetable
+                        (station_fk, train_fk, time, previous)
+                        VALUES
+                        (:station_pk, :train_pk, :time, :previous)
+                        RETURNING timetable.pk''',
+                        {'station_pk': station_pk, 'train_pk': train_pk, 'time': time_, 'previous': previous}
+                    )
+                    current = cur.fetchone()['pk']
+                    if previous:
+                        cur.execute(
+                            'UPDATE timetable SET next=:current WHERE pk=:previous',
+                            {'current': current, 'previous': previous}
+                        )
+                    previous = current
 
 
 def load_data_from_json(
-    cur: sqlite3.Cursor, route: pathlib.Path,
+    con: sqlite3.Connection, route: pathlib.Path,
         station: pathlib.Path, timetable: pathlib.Path):
-    # must be in this order
+    cur = con.cursor()
+    # Due to database schema, must be in this order
     fill_in_stations(cur, station)
     fill_in_routes(cur, route)
     fill_in_timetable(cur, timetable)
@@ -280,12 +249,7 @@ def adapt_time(t: timedelta) -> int:
 
 
 def convert_time(digits: bytes) -> timedelta:
-    number = int(digits)
-    seconds = number % 60
-    m = number // 60
-    hours = m // 60
-    minutes = m % 60
-    return timedelta(hours=hours, minutes=minutes, seconds=seconds)
+    return timedelta(seconds=int(digits))
 
 
 def adapt_bool(b: bool) -> int:
@@ -309,10 +273,10 @@ def setup_sqlite(db_location: str = ':memory:') -> sqlite3.Connection:
 if __name__ == '__main__':
     con = setup_sqlite()
     create_schema(con)
-    cur = con.cursor()
     load_data_from_json(
-        cur,
+        con,
         pathlib.Path('./JSON/route.json'),
         pathlib.Path('./JSON/station.json'),
         pathlib.Path('./JSON/timetable.json'),
     )
+    breakpoint()
