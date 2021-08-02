@@ -3,7 +3,7 @@ from __future__ import annotations
 import pathlib
 import sqlite3
 from datetime import timedelta
-from itertools import groupby, zip_longest
+from itertools import groupby, tee, zip_longest
 from math import ceil
 from operator import itemgetter
 
@@ -93,46 +93,6 @@ def grouper(iterable, n, fillvalue=None):
     return zip_longest(*args, fillvalue=fillvalue)
 
 
-def get_train_list(con: sqlite3.Connection, route_name: str) -> list[str]:
-    cur = con.execute(
-        '''
-        SELECT
-            train.code
-            ,timetable.time AS t
-            ,station.pk AS x
-        FROM train
-        JOIN timetable ON
-            timetable.train_fk = train.pk
-        JOIN station ON
-            timetable.station_fk = station.pk
-        JOIN route_station ON
-            station.pk = route_station.station_fk
-        JOIN route ON
-            route.pk = route_station.route_fk
-        WHERE
-            route.name = ?
-        GROUP BY
-            train.code
-        HAVING
-            COUNT(timetable.pk) > 2
-        ORDER BY
-            train.code
-            ,timetable.time ASC
-        ''',
-        (route_name,)
-    )
-    result = []
-    maximum = timedelta(hours=4)  # exceptioally long travel/stop time
-    # Try to exclude train '145' in south bound and residue point of time when transfering/passing between lines
-    # TODO
-    for code, items in groupby(cur.fetchall(), key=itemgetter('code')):
-        if any((b['t'] - a['t'] > maximum for a, b in grouper(items, 2, fillvalue={'t': timedelta()}))):
-            continue
-
-        result.append(code)
-    return result
-
-
 def get_time_list(con: sqlite3.Connection, code: str, route_name: str) -> list[(int, float)]:
     cur = con.execute(
         '''
@@ -188,9 +148,10 @@ def draw_train_lines(con: sqlite3.Connection, start_hour: int, train_list: tuple
 
 def draw(con: sqlite3.Connection, route_name: str,
          height: int, width: int,
-         start_hour: int, hour_count: int) -> list[str]:
+         start_hour: int, hour_count: int,
+         train_list: tuple[str]
+         ) -> list[str]:
     result = [
-        # '<?xml version="1.0" encoding="utf-8" ?>',
         f'''<svg
         xmlns="http://www.w3.org/2000/svg"
         xmlns:xlink="http://www.w3.org/1999/xlink"
@@ -202,7 +163,6 @@ def draw(con: sqlite3.Connection, route_name: str,
 
     result.extend(draw_backgrond(con, route_name, height, width, start_hour, hour_count))
 
-    train_list = get_train_list(con, route_name)
     result.extend(draw_train_lines(con, start_hour=start_hour, train_list=train_list, route_name=route_name))
 
     result.append('</svg>')
@@ -210,10 +170,10 @@ def draw(con: sqlite3.Connection, route_name: str,
 
 
 def from_timedelta_to_hour(t: timedelta) -> int:
-    return t // 60 // 60
+    return round(t.total_seconds() // 60 // 60)
 
 
-def decide_layout(con: sqlite3.Connection, route_name: str) -> (int, int, int, int):
+def decide_layout(con: sqlite3.Connection, route_name: str) -> (int, int, int, int, list[str]):
     cur = con.execute(
         '''
         SELECT max(route_station.relative_distance) as height
@@ -230,9 +190,10 @@ def decide_layout(con: sqlite3.Connection, route_name: str) -> (int, int, int, i
     cur = con.execute(
         '''
         SELECT
-            min(timetable.time) as early
-            ,max(timetable.time) as late
+            timetable.time
             ,train.code
+            ,timetable.time - LAG(timetable.time)
+                OVER (PARTITION BY train.code ORDER BY train.code, timetable.time ASC) AS diff
         FROM
             timetable
         JOIN station ON
@@ -245,22 +206,92 @@ def decide_layout(con: sqlite3.Connection, route_name: str) -> (int, int, int, i
             timetable.train_fk = train.pk
         WHERE
             route.name = ?
-        GROUP BY
+        ORDER BY
             train.code
-        HAVING
-            COUNT(timetable.pk) > 2
+            ,timetable.time ASC
         ''',
         (route_name,)
     )
-    times = tuple((r['early'], r['late']) for r in cur.fetchall())
-    start_time = min(times, key=itemgetter(0))[0]
-    start_hour = from_timedelta_to_hour(start_time)
-    end_time = max(times, key=itemgetter(1))[1]
-    end_hour = from_timedelta_to_hour(end_time) + 1
+    # TODO better solving these by SQL statement
+    # Exclude tranfering line records can be solved by following statement
+    #
+    # SELECT
+    # ...
+    #   ,min(timetable.time) AS early
+    #   ,max(timetable.time) AS late
+    # ...
+    # GROUP BY
+    #     blah.code
+    # HAVING
+    #     COUNT(blah.timetable_pk) > 2
+    # ...
+    #
+    # Travel time could be solved by WITH and LAG(). Like the following
+    #
+    # WITH blah AS (
+    #     SELECT
+    #         train.code
+    #         ,min(timetable.time) as early
+    #         ,max(timetable.time) as late
+    #         ,timetable.pk AS timetable_pk
+    #         ,timetable.time AS t
+    #         ,route.name AS name
+    #         ,station.pk AS x
+    #         ,timetable.time - LAG(timetable.time) OVER (PARTITION BY train.code ORDER BY timetable.time ASC) AS diff
+    #     FROM
+    #         train
+    #     JOIN timetable ON
+    #         timetable.train_fk = train.pk
+    #     JOIN station ON
+    #         timetable.station_fk = station.pk
+    #     JOIN route_station ON
+    #         station.pk = route_station.station_fk
+    #     JOIN route ON
+    #         route.pk = route_station.route_fk
+    # )
+    # SELECT
+    #     blah.code
+    #     ,blah.t
+    #     ,blah.x
+    #     ,blah.diff
+    #     ,blah.early
+    #     ,blah.late
+    #     ,max(blah.diff) AS max_diff
+    # FROM blah
+    # WHERE
+    #     blah.name = ?
+    # GROUP BY
+    #     blah.code
+    # HAVING
+    #     COUNT(blah.timetable_pk) > 2
+    # ORDER BY
+    #     blah.code
+    #     ,blah.t ASC
+    #
+    # However, I don't know how to combine LAG() with aggreation function
+
+    infos = tuple((r['code'], r['time'], r['diff']) for r in cur.fetchall())
+    min_times = []
+    max_times = []
+    train_list = []
+    max_travel_time = timedelta(hours=8).total_seconds()
+    for code, info in groupby(infos, key=itemgetter(0)):
+        for_diff, for_time, for_count = tee(info, 3)
+        # HAVING COUNT(blah.timetable_pk) > 2
+        if len([*for_count]) <= 2\
+                or max([r[2] for r in for_diff if r[2] is not None]) > max_travel_time:  # LAG() with WHERE condition
+            continue
+        else:
+            train_list.append(code)
+            for a, b in grouper(for_time, n=2):
+                min_times.append(a[1])  # min(timetable.time) as early with GROUP BY and ORDER BY
+                max_times.append(b[1])  # max(timetable.time) as late with GROUP BY and ORDER BY
+    start_hour = from_timedelta_to_hour(min(min_times))
+    end_hour = from_timedelta_to_hour(max(max_times)) + 1
 
     hour_count = end_hour - start_hour + 1
     width = (hour_count - 1) * HOUR_GAP + 2 * PADDING
-    return height, width, start_hour, hour_count
+    return height, width, start_hour, hour_count, train_list
 
 
 def get_route_names(con: sqlite3.Connection):
@@ -306,12 +337,14 @@ if __name__ == '__main__':
         route_names = get_route_names(con)
         print(f'There are {len(route_names)} routes to process')
         for i, route in enumerate(route_names, start=1):
-            height, width, start_hour, hour_count = decide_layout(con, route_name=route)
+            height, width, start_hour, hour_count, train_list = decide_layout(con, route_name=route)
 
             with open(f'{route}.svg', mode='w') as f:
                 f.write(draw(
                     con=con, route_name=route,
                     height=height, width=width,
-                    start_hour=start_hour, hour_count=hour_count))
+                    start_hour=start_hour, hour_count=hour_count,
+                    train_list=train_list,
+                ))
             print(f'{i} / {len(route_names)}')
     print('All done')
