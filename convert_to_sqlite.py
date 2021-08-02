@@ -9,6 +9,8 @@ from operator import itemgetter
 from typing import Union
 
 NEXT_DAY = timedelta(days=1)
+FIRST_HOUR = timedelta(hours=1)
+ENLARGE_GAP_RATE = 20
 
 CAR_CLASS = {  # copy from developer manual
     '1101': '自強(太,障)',
@@ -170,8 +172,7 @@ def fill_in_routes(cur: sqlite3.Cursor, route: pathlib.Path):
                     (:route_pk, :station_pk, :distance)
                     ''',
                     {'route_pk': route_pk, 'station_pk': station_pk,
-                     'distance': float(route_info['staMil']) * 20}
-                    # Enlarge the gap between stations
+                     'distance': float(route_info['staMil']) * ENLARGE_GAP_RATE}
                 )
 
 
@@ -217,9 +218,15 @@ def fill_in_timetable(cur: sqlite3.Cursor, timetable: pathlib.Path):
                 station_pk = cur.fetchone()['pk']
                 for key in ('ARRTime', 'DEPTime'):
                     time_ = iso_time_to_timedelta(time_info[key])
-                    if start_over_night_route or station_code in over_night_station:
-                        time_ += NEXT_DAY
+                    if station_code == over_night_station:
                         start_over_night_route = True
+                        # it seems that no train would travel/stay for
+                        # more than one hour around midnight
+                        # so we have this hack
+                        if time_ < FIRST_HOUR:
+                            time_ += NEXT_DAY
+                    elif start_over_night_route:
+                        time_ += NEXT_DAY
                     cur.execute(
                         '''INSERT INTO timetable
                         (station_fk, train_fk, time, previous)
@@ -237,6 +244,78 @@ def fill_in_timetable(cur: sqlite3.Cursor, timetable: pathlib.Path):
                     previous = current
 
 
+def patch_stations(cur):
+    cur.execute(
+        '''
+        SELECT
+            station.pk
+        FROM
+            station
+        WHERE
+            station.code="3330"
+        '''
+    )
+    wuri_pk = cur.fetchone()['pk']
+    cur.execute(
+        '''
+        UPDATE
+            route_station
+        SET
+            relative_distance = 4010
+        WHERE
+            station_fk = ?
+        ''',
+        (wuri_pk,)
+    )
+    cur.execute(
+        '''
+        SELECT
+            route_station.relative_distance AS d
+        FROM
+            route_station
+        WHERE
+            station_fk = ?
+        ''',
+        (wuri_pk,)
+    )
+    assert cur.fetchone()['d'] == 200.5 * ENLARGE_GAP_RATE
+
+    cur.execute(
+        '''
+        SELECT
+            station.pk
+        FROM
+            station
+        WHERE
+            station.code="1180"
+        '''
+    )
+    zhubei_pk = cur.fetchone()['pk']
+    cur.execute(
+        '''
+        UPDATE
+            route_station
+        SET
+            relative_distance = 2012
+        WHERE
+            station_fk = ?
+        ''',
+        (zhubei_pk,)
+    )
+    cur.execute(
+        '''
+        SELECT
+            route_station.relative_distance AS d
+        FROM
+            route_station
+        WHERE
+            station_fk = ?
+        ''',
+        (zhubei_pk,)
+    )
+    assert cur.fetchone()['d'] == 100.6 * ENLARGE_GAP_RATE
+
+
 def load_data_from_json(
     con: sqlite3.Connection, route: pathlib.Path,
         station: pathlib.Path, timetable: pathlib.Path):
@@ -245,6 +324,7 @@ def load_data_from_json(
     fill_in_stations(cur, station)
     fill_in_routes(cur, route)
     fill_in_timetable(cur, timetable)
+    patch_stations(cur)
 
 
 def adapt_time(t: timedelta) -> int:
@@ -252,10 +332,6 @@ def adapt_time(t: timedelta) -> int:
 
 
 def convert_time(digits: Union[int, bytes]) -> timedelta:
-    # seconds = int(digits) % 60
-    # minutes = int(digits) // 60 % 60
-    # hours = int(digits) // 60 // 60
-    # return timedelta(hours=hours, minutes=minutes, seconds=seconds)
     return timedelta(seconds=int(digits))
 
 
