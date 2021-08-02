@@ -12,7 +12,7 @@ HOUR_GAP = round(3600 * SECOND_GAP)
 PADDING = 50
 
 
-def draw_hour_lines(height: int, width: int, hours: list[int]) -> list[str]:
+def draw_hour_lines(height: int, width: int, start_hour: int, hour_count: int) -> list[str]:
     bottom_y = PADDING + height
     text_gap = height // 7  # gap between vertical text TODO should relate with 'viewport'
     ten_minute_gap = round(60 * 10 * SECOND_GAP)
@@ -20,9 +20,9 @@ def draw_hour_lines(height: int, width: int, hours: list[int]) -> list[str]:
     result = []
     every_ten_min_x = [
         PADDING + m * ten_minute_gap + i * HOUR_GAP
-        for i in range(len(hours)) for m in range(6)
-    ] + [PADDING + len(hours) * HOUR_GAP]  # the very last hour
-    for i, x in enumerate(every_ten_min_x, start=hours[0] * 6):
+        for i in range(hour_count) for m in range(6)
+    ] + [PADDING + hour_count * HOUR_GAP]  # the very last hour
+    for i, x in enumerate(every_ten_min_x, start=start_hour * 6):
         if i % 6 == 0:  # hour
             result.append(f'<line x1="{x}" x2="{x}" y1="{PADDING}" y2="{bottom_y}" stroke="yellow" />')
         elif i % 3 == 0:  # thirty minutes
@@ -78,9 +78,9 @@ def draw_train_lines(cur: sqlite3.Cursor, start_hour: int) -> list[str]:
     return result
 
 
-def draw_backgrond(con: sqlite3.Connection, route_name: str, height: int, width: int, hours: list[int]):
+def draw_backgrond(con: sqlite3.Connection, route_name: str, height: int, width: int, start_hour: int, hour_count: int):
     result = []
-    result.extend(draw_hour_lines(height, width, hours))
+    result.extend(draw_hour_lines(height, width, start_hour, hour_count))
 
     cur = con.execute(
         '''
@@ -100,13 +100,13 @@ def draw_backgrond(con: sqlite3.Connection, route_name: str, height: int, width:
     return result
 
 
-def draw(con: sqlite3.Connection, route_name: str, height: int, width: int, hours: list[int]) -> list[str]:
+def draw(con: sqlite3.Connection, route_name: str, height: int, width: int, start_hour: int, hour_count: int) -> list[str]:
     result = [
         '<?xml version="1.0" encoding="utf-8" ?>',
         f'<svg xmlns="http://www.w3.org/2000/svg" style="font-family:Tahoma" width="{width}" height="{height + 2 * PADDING}">',
     ]
 
-    result.extend(draw_backgrond(con, route_name, height, width, hours))
+    result.extend(draw_backgrond(con, route_name, height, width, start_hour, hour_count))
 
     # cur = con.execute(
     #     '''
@@ -138,7 +138,7 @@ def from_timedelta_to_hour(t: timedelta) -> int:
     return t // 60 // 60
 
 
-def decide_layout(con: sqlite3.Connection, route_name: str) -> (int, int, list[int]):
+def decide_layout(con: sqlite3.Connection, route_name: str) -> (int, int, int, int):
     cur = con.execute(
         '''
         SELECT max(route_station.relative_distance) as height
@@ -168,8 +168,8 @@ def decide_layout(con: sqlite3.Connection, route_name: str) -> (int, int, list[i
         ''',
         (route_name,)
     )
-    earliest_time = cur.fetchone()['early']
-    earliest_hour = from_timedelta_to_hour(earliest_time)
+    start_time = cur.fetchone()['early']
+    start_hour = from_timedelta_to_hour(start_time)
 
     cur = con.execute(
         '''
@@ -188,12 +188,12 @@ def decide_layout(con: sqlite3.Connection, route_name: str) -> (int, int, list[i
         ''',
         (route_name,)
     )
-    latest_time = cur.fetchone()['late']
-    latest_hour = from_timedelta_to_hour(latest_time) + 1
+    end_time = cur.fetchone()['late']
+    end_hour = from_timedelta_to_hour(end_time) + 1
 
-    hours = tuple(i for i in range(earliest_hour, latest_hour + 1))
-    width = (len(hours) - 1) * HOUR_GAP + 2 * PADDING
-    return height, width, hours
+    hour_count = end_hour - start_hour + 1
+    width = (hour_count - 1) * HOUR_GAP + 2 * PADDING
+    return height, width, start_hour, hour_count
 
 
 if __name__ == '__main__':
@@ -207,7 +207,10 @@ if __name__ == '__main__':
             pathlib.Path('./JSON/station.json'),
             pathlib.Path('./JSON/timetable.json'),
         )
-        height, width, hours = decide_layout(con, route_name=route_name)
+        height, width, start_hour, hour_count = decide_layout(con, route_name=route_name)
 
         with open('test.svg', mode='w') as f:
-            f.write(draw(con=con, route_name=route_name, height=height, width=width, hours=hours))
+            f.write(draw(
+                con=con, route_name=route_name,
+                height=height, width=width,
+                start_hour=start_hour, hour_count=hour_count))
