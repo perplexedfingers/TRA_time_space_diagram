@@ -10,7 +10,6 @@ from typing import Union
 
 NEXT_DAY = timedelta(days=1)
 FIRST_HOUR = timedelta(hours=1)
-ENLARGE_GAP_RATE = 20
 
 CAR_CLASS = {  # copy from developer manual
     '1101': '自強(太,障)',
@@ -172,7 +171,7 @@ def fill_in_routes(cur: sqlite3.Cursor, route: pathlib.Path):
                     (:route_pk, :station_pk, :distance)
                     ''',
                     {'route_pk': route_pk, 'station_pk': station_pk,
-                     'distance': float(route_info['staMil']) * ENLARGE_GAP_RATE}
+                     'distance': float(route_info['staMil'])}
                 )
 
 
@@ -261,24 +260,12 @@ def patch_stations(cur):
         UPDATE
             route_station
         SET
-            relative_distance = 4010
+            relative_distance = 200.5
         WHERE
             station_fk = ?
         ''',
         (wuri_pk,)
     )
-    cur.execute(
-        '''
-        SELECT
-            route_station.relative_distance AS d
-        FROM
-            route_station
-        WHERE
-            station_fk = ?
-        ''',
-        (wuri_pk,)
-    )
-    assert cur.fetchone()['d'] == 200.5 * ENLARGE_GAP_RATE
 
     cur.execute(
         '''
@@ -296,24 +283,35 @@ def patch_stations(cur):
         UPDATE
             route_station
         SET
-            relative_distance = 2012
+            relative_distance = 100.6
         WHERE
             station_fk = ?
         ''',
         (zhubei_pk,)
     )
+
     cur.execute(
         '''
         SELECT
-            route_station.relative_distance AS d
+            station.pk
         FROM
+            station
+        WHERE
+            station.code="6030"
+        '''
+    )
+    ruiyuan_pk = cur.fetchone()['pk']
+    cur.execute(
+        '''
+        UPDATE
             route_station
+        SET
+            relative_distance = 300.5
         WHERE
             station_fk = ?
         ''',
-        (zhubei_pk,)
+        (ruiyuan_pk,)
     )
-    assert cur.fetchone()['d'] == 100.6 * ENLARGE_GAP_RATE
 
 
 def load_data_from_json(

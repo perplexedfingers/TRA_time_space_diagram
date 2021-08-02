@@ -3,20 +3,21 @@ from __future__ import annotations
 import pathlib
 import sqlite3
 from datetime import timedelta
-from itertools import groupby
 from math import ceil
-from operator import itemgetter
 
 from convert_to_sqlite import create_schema, load_data_from_json, setup_sqlite
+
+# TODO use logging rather than print
 
 SECOND_GAP = 0.4
 HOUR_GAP = round(3600 * SECOND_GAP)
 PADDING = 50
+ENLARGE_GAP_RATE = 10
 
 
 def draw_hour_lines(height: int, width: int, start_hour: int, hour_count: int) -> list[str]:
     bottom_y = PADDING + height
-    text_gap = height // 7  # gap between vertical text TODO should relate with 'viewport'
+    text_gap = min(height // 7, 700)  # gap between vertical text TODO should relate with 'viewport'
     ten_minute_gap = round(60 * 10 * SECOND_GAP)
 
     result = []
@@ -46,7 +47,7 @@ def draw_station_lines(cur: sqlite3.Cursor, width: int) -> list[str]:
     cur.arraysize = 10  # random number
     stations = cur.fetchmany()
     while stations:
-        station_y = [(s['is_active'], s['y'] + PADDING, s['name']) for s in stations]
+        station_y = [(s['is_active'], round(s['y'] * ENLARGE_GAP_RATE + PADDING), s['name']) for s in stations]
         for is_active, y, name in station_y:
             if is_active:
                 result.append(f'<line x1="{PADDING}" x2="{width - PADDING}" y1="{y}" y2="{y}" stroke="black" />')
@@ -137,10 +138,19 @@ def draw_train_lines(con: sqlite3.Connection, start_hour: int, train_list: list[
     print(f'{len(train_list)} trains to process in "{route_name}"')
     for i, code in enumerate(train_list):
         time_list = get_time_list(con, code, route_name)
-        d = ' '.join((f'{round((x - x_offset).total_seconds() * SECOND_GAP) + PADDING},{y + PADDING}' for x, y in time_list))
+        d = ' '.join(
+            (f'{round((x - x_offset).total_seconds() * SECOND_GAP) + PADDING},{y * ENLARGE_GAP_RATE + PADDING}'
+             for x, y in time_list)
+        )
         result.append(f'<path id="{code}" d="M {d}" stroke="black" stroke-width="2" fill="none"></path>')
         result.extend([
-            f'<text><textPath stroke="black" startOffset="{PADDING + 600 * i}" xlink:href="#{code}"><tspan dy="-3">{code}</tspan></textPath></text>'
+            f'''<text>
+            <textPath stroke="black" startOffset="{PADDING + 600 * i}" xlink:href="#{code}">
+            <tspan dy="-3">
+            {code}
+            </tspan>
+            </textPath>
+            </text>'''
             for i in range(0, 6)  # 600?
         ])
         print(f'{i} / {len(train_list)}', end='\r')
@@ -148,7 +158,9 @@ def draw_train_lines(con: sqlite3.Connection, start_hour: int, train_list: list[
     return result
 
 
-def draw(con: sqlite3.Connection, route_name: str, height: int, width: int, start_hour: int, hour_count: int) -> list[str]:
+def draw(con: sqlite3.Connection, route_name: str,
+         height: int, width: int,
+         start_hour: int, hour_count: int) -> list[str]:
     result = [
         # '<?xml version="1.0" encoding="utf-8" ?>',
         f'''<svg
@@ -180,11 +192,12 @@ def decide_layout(con: sqlite3.Connection, route_name: str) -> (int, int, int, i
         FROM route_station
         JOIN route ON
             route.pk = route_station.route_fk
-        WHERE route.name = ?
+        WHERE
+            route.name = ?
         ''',
         (route_name,)
     )
-    height = round(cur.fetchone()['height'])
+    height = round(cur.fetchone()['height'] * ENLARGE_GAP_RATE)
 
     cur = con.execute(
         '''
@@ -198,8 +211,6 @@ def decide_layout(con: sqlite3.Connection, route_name: str) -> (int, int, int, i
             route.pk = route_station.route_fk
         WHERE
             route.name = ?
-        AND
-            timetable.previous IS NULL
         ''',
         (route_name,)
     )
@@ -218,8 +229,6 @@ def decide_layout(con: sqlite3.Connection, route_name: str) -> (int, int, int, i
             route.pk = route_station.route_fk
         WHERE
             route.name = ?
-        AND
-            timetable.next IS NULL
         ''',
         (route_name,)
     )
@@ -231,8 +240,37 @@ def decide_layout(con: sqlite3.Connection, route_name: str) -> (int, int, int, i
     return height, width, start_hour, hour_count
 
 
+def get_route_names(con: sqlite3.Connection):
+    # TODO exclue route that has no station or train
+    cur = con.execute(
+        '''
+        SELECT
+            DISTINCT route.name
+        FROM
+            route
+        JOIN route_station ON
+            route_station.route_fk = route.pk
+        JOIN station ON
+            route_station.station_fk = station.pk
+        JOIN timetable ON
+            timetable.station_fk = station.pk
+        WHERE
+            route_station.relative_distance != 0
+        AND
+            EXISTS (
+                SELECT 1
+                FROM
+                    timetable
+                WHERE
+                    timetable.station_fk IS NOT NULL
+            )
+        '''
+    )
+    return [r['name'] for r in cur.fetchall()]
+
+
 if __name__ == '__main__':
-    route_name = '西部幹線'
+    print('Start')
     con = setup_sqlite()
     with con:
         create_schema(con)
@@ -242,10 +280,16 @@ if __name__ == '__main__':
             pathlib.Path('./JSON/station.json'),
             pathlib.Path('./JSON/timetable.json'),
         )
-        height, width, start_hour, hour_count = decide_layout(con, route_name=route_name)
+        print('Finish loading data')
+        route_names = get_route_names(con)
+        print(f'There are {len(route_names)} routes to process')
+        for i, route in enumerate(route_names, start=1):
+            height, width, start_hour, hour_count = decide_layout(con, route_name=route)
 
-        with open('test.svg', mode='w') as f:
-            f.write(draw(
-                con=con, route_name=route_name,
-                height=height, width=width,
-                start_hour=start_hour, hour_count=hour_count))
+            with open(f'{route}.svg', mode='w') as f:
+                f.write(draw(
+                    con=con, route_name=route,
+                    height=height, width=width,
+                    start_hour=start_hour, hour_count=hour_count))
+            print(f'{i} / {len(route_names)}')
+    print('All done')
