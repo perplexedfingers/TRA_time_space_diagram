@@ -7,44 +7,35 @@ from math import ceil
 
 from convert_to_sqlite import create_schema, load_data_from_json, setup_sqlite
 
-SECOND_GAP = 1
-HOUR_GAP = 3600 * SECOND_GAP
+SECOND_GAP = 0.1
+HOUR_GAP = round(3600 * SECOND_GAP)
 PADDING = 50
 
 
 def draw_hour_lines(height: int, width: int, hours: list[int]) -> list[str]:
     bottom_y = PADDING + height
     text_gap = height // 7  # gap between vertical text TODO should relate with 'viewport'
-    ten_minute_gap = 60 * 10 * SECOND_GAP
+    ten_minute_gap = round(60 * 10 * SECOND_GAP)
 
     result = []
-    for i, hour in enumerate(hours):
-        # lines for every hour
-        hour_x = PADDING + i * HOUR_GAP
-        result.append(f'<line x1="{hour_x}" x2="{hour_x}" y1="{PADDING}" y2="{bottom_y}" stroke="yellow" />')
-
-        # text for every hour, goes down vertically along the hour line
+    every_ten_min_x = [
+        PADDING + m * ten_minute_gap + i * HOUR_GAP
+        for i in range(len(hours)) for m in range(6)
+    ] + [PADDING + len(hours) * HOUR_GAP]  # the very last hour
+    for i, x in enumerate(every_ten_min_x, start=hours[0] * 6):
+        if i % 6 == 0:  # hour
+            result.append(f'<line x1="{x}" x2="{x}" y1="{PADDING}" y2="{bottom_y}" stroke="yellow" />')
+        elif i % 3 == 0:  # thirty minutes
+            result.append(f'<line x1="{x}" x2="{x}" y1="{PADDING}" y2="{bottom_y}" stroke="green" />')
+        else:
+            result.append(f'<line x1="{x}" x2="{x}" y1="{PADDING}" y2="{bottom_y}" stroke="red" />')
         for j in range(0, ceil(height + text_gap), text_gap):
-            result.append(f'<text fill="black" x="{hour_x}" y="{PADDING - 1 + j}">{"{:0>2d}00".format(hour)}</text>')
-
-        # lines for every 10 minutes
-        if i + 1 != len(hours):
-            for j in range(1, 6):
-                minute_x = hour_x + j * ten_minute_gap
-                # different color for every 30 minutes
-                if j != 3:
-                    result.append(
-                        f'<line x1="{minute_x}" x2="{minute_x}" y1="{PADDING}" y2="{bottom_y}" stroke="red" />')
-                else:
-                    result.append(
-                        f'<line x1="{minute_x}" x2="{minute_x}" y1="{PADDING}" y2="{bottom_y}" stroke="green" />')
-
-                # text for every 10 minutes. goes down vertically along the minute line
-                for k in range(0, ceil(height + text_gap), text_gap):
-                    if j != 3:
-                        result.append(f'<text fill="grey" x="{minute_x}" y="{PADDING - 1 + k}">{j}0</text>')
-                    else:
-                        result.append(f'<text fill="black" x="{minute_x}" y="{PADDING - 1 + k}">{j}0</text>')
+            if i % 6 == 0:  # hour
+                result.append(f'<text fill="black" x="{x}" y="{PADDING - 1 + j}">{"{:0>2d}00".format(i // 6)}</text>')
+            elif i % 3 == 0:  # thirty minutes
+                result.append(f'<text fill="black" x="{x}" y="{PADDING - 1 + j}">{i % 6}0</text>')
+            else:
+                result.append(f'<text fill="grey" x="{x}" y="{PADDING - 1 + j}">{i % 6}0</text>')
     return result
 
 
@@ -79,7 +70,7 @@ def draw_train_lines(cur: sqlite3.Cursor, start_hour: int) -> list[str]:
     while stations:
         for station in stations:
             path.append(
-                f"{(station['time'].total_seconds() - x_offset) * SECOND_GAP},{station['relative_distance'] + PADDING}"
+                f"{round((station['time'].total_seconds() - x_offset) * SECOND_GAP)},{station['relative_distance'] + PADDING}"
             )
             path.extend([
                 f'<text><textPath stroke="black" startOffset = "{PADDING + 600 * i}"><tspan dy="-3">{station["code"]}</tspan></textPath></text>'
