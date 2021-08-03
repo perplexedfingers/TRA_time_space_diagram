@@ -8,8 +8,6 @@ from operator import itemgetter
 
 from convert_to_sqlite import create_schema, load_data_from_json, setup_sqlite
 
-# TODO download data set utility
-
 SECOND_GAP = 0.4
 TEN_MINUTE_GAP = round(60 * 10 * SECOND_GAP)
 HOUR_GAP = round(3600 * SECOND_GAP)
