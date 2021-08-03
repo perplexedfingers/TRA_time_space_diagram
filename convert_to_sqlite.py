@@ -81,7 +81,7 @@ def create_schema(con: sqlite3.Connection):
         (
         pk INTEGER PRIMARY KEY AUTOINCREMENT
         ,code TEXT UNIQUE NOT NULL
-        ,is_active bool DEFAULT 0
+        ,is_active bool DEFAULT 0 NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS station_name_cht
@@ -176,10 +176,11 @@ def fill_in_routes(cur: sqlite3.Cursor, route: pathlib.Path):
                 )
                 cur.execute(
                     '''
-                    INSERT INTO route_station
-                    (route_fk, station_fk, relative_distance)
+                    INSERT INTO
+                        route_station
+                        (route_fk, station_fk, relative_distance)
                     VALUES
-                    (:route_pk, :station_pk, :distance)
+                        (:route_pk, :station_pk, :distance)
                     ''',
                     {'route_pk': route_pk, 'station_pk': station_pk,
                      'distance': float(route_info['staMil'])}
@@ -238,11 +239,15 @@ def fill_in_timetable(cur: sqlite3.Cursor, timetable: pathlib.Path):
                     elif start_over_night_route:
                         time_ += NEXT_DAY
                     cur.execute(
-                        '''INSERT INTO timetable
-                        (station_fk, train_fk, time, previous)
+                        '''
+                        INSERT INTO
+                            timetable
+                            (station_fk, train_fk, time, previous)
                         VALUES
-                        (:station_pk, :train_pk, :time, :previous)
-                        RETURNING timetable.pk''',
+                            (:station_pk, :train_pk, :time, :previous)
+                        RETURNING
+                            timetable.pk
+                        ''',
                         {'station_pk': station_pk, 'train_pk': train_pk, 'time': time_, 'previous': previous}
                     )
                     current = cur.fetchone()['pk']
@@ -256,71 +261,29 @@ def fill_in_timetable(cur: sqlite3.Cursor, timetable: pathlib.Path):
 
 def patch_stations(cur):
     cur.execute(
-        '''
-        SELECT
-            station.pk
-        FROM
-            station
-        WHERE
-            station.code="3330"
-        '''
+        'SELECT station.pk FROM station WHERE station.code="3330"'
     )
     wuri_pk = cur.fetchone()['pk']
     cur.execute(
-        '''
-        UPDATE
-            route_station
-        SET
-            relative_distance = 200.5
-        WHERE
-            station_fk = ?
-        ''',
+        'UPDATE route_station SET relative_distance = 200.5 WHERE station_fk = ?',
         (wuri_pk,)
     )
 
     cur.execute(
-        '''
-        SELECT
-            station.pk
-        FROM
-            station
-        WHERE
-            station.code="1180"
-        '''
+        'SELECT station.pk FROM station WHERE station.code="1180"'
     )
     zhubei_pk = cur.fetchone()['pk']
     cur.execute(
-        '''
-        UPDATE
-            route_station
-        SET
-            relative_distance = 100.6
-        WHERE
-            station_fk = ?
-        ''',
+        'UPDATE route_station SET relative_distance = 100.6 WHERE station_fk = ?',
         (zhubei_pk,)
     )
 
     cur.execute(
-        '''
-        SELECT
-            station.pk
-        FROM
-            station
-        WHERE
-            station.code="6030"
-        '''
+        'SELECT station.pk FROM station WHERE station.code="6030"'
     )
     ruiyuan_pk = cur.fetchone()['pk']
     cur.execute(
-        '''
-        UPDATE
-            route_station
-        SET
-            relative_distance = 300.5
-        WHERE
-            station_fk = ?
-        ''',
+        'UPDATE route_station SET relative_distance = 300.5 WHERE station_fk = ?',
         (ruiyuan_pk,)
     )
 

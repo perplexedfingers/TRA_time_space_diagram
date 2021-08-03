@@ -9,7 +9,6 @@ from operator import itemgetter
 from convert_to_sqlite import create_schema, load_data_from_json, setup_sqlite
 
 # TODO use logging rather than print
-# TODO align SQL statements
 # TODO download data set utility
 
 SECOND_GAP = 0.4
@@ -76,15 +75,20 @@ def draw_backgrond(con: sqlite3.Connection, route_name: str,
 
     cur = con.execute(
         '''
-        SELECT station.is_active, station_name_cht.name, route_station.relative_distance AS y
-        FROM station
+        SELECT
+            station.is_active
+            ,station_name_cht.name
+            ,route_station.relative_distance AS y
+        FROM
+            station
         JOIN station_name_cht ON
             station.pk = station_name_cht.station_fk
         JOIN route_station ON
             station.pk = route_station.station_fk
         JOIN route ON
             route.pk = route_station.route_fk
-        WHERE route.name = ?
+        WHERE
+            route.name = ?
         ''',
         (route_name,)
     )
@@ -98,7 +102,8 @@ def get_time_list(con: sqlite3.Connection, code: str, route_name: str) -> tuple[
         SELECT
             timetable.time AS x
             ,route_station.relative_distance AS y
-        FROM timetable
+        FROM
+            timetable
         JOIN station ON
             timetable.station_fk = station.pk
         JOIN route_station ON
@@ -109,7 +114,7 @@ def get_time_list(con: sqlite3.Connection, code: str, route_name: str) -> tuple[
             route.pk = route_station.route_fk
         WHERE
             route.name = :name
-            AND
+        AND
             train.code = :code
         ORDER BY
             timetable.time ASC
@@ -264,8 +269,10 @@ def seconds_to_hours(t: int) -> int:
 def decide_layout(con: sqlite3.Connection, route_name: str) -> (int, int, int, int, tuple[str, str]):
     cur = con.execute(
         '''
-        SELECT max(route_station.relative_distance) as height
-        FROM route_station
+        SELECT
+            max(route_station.relative_distance) as height
+        FROM
+            route_station
         JOIN route ON
             route.pk = route_station.route_fk
         WHERE
@@ -278,7 +285,7 @@ def decide_layout(con: sqlite3.Connection, route_name: str) -> (int, int, int, i
     cur = con.execute(
         '''
         WITH
-            blah
+            info
         AS (
             SELECT
                 train.code
@@ -311,22 +318,22 @@ def decide_layout(con: sqlite3.Connection, route_name: str) -> (int, int, int, i
                 route.pk = route_station.route_fk
             )
         SELECT
-            MIN(blah.time) AS early
-            ,MAX(blah.time) AS late
-            ,blah.code
-            ,blah.train_type
+            MIN(info.time) AS early
+            ,MAX(info.time) AS late
+            ,info.code
+            ,info.train_type
         FROM
-            blah
+            info
         WHERE
-            blah.route_name = ?
+            info.route_name = ?
         GROUP BY
-            blah.code
+            info.code
         HAVING
-            COUNT(blah.timetable_pk) > 2
+            COUNT(info.timetable_pk) > 2 -- at least travel once in the route
         AND
-            MAX(blah.diff) < 3600 * 8
+            MAX(info.diff) < 28800  -- 8 hours in seconds
         ORDER BY
-            blah.code;
+            info.code;
         ''',
         (route_name,)
     )
@@ -357,7 +364,8 @@ def get_route_names(con: sqlite3.Connection) -> tuple[str]:
             route_station.relative_distance != 0
         AND
             EXISTS (
-                SELECT 1
+                SELECT
+                    1
                 FROM
                     timetable
                 WHERE
