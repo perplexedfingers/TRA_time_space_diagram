@@ -150,5 +150,5 @@ $ python download_json.py
     https://data.gov.tw/dataset/6999
 - Station
     https://data.gov.tw/dataset/33425
-- Train
+- Timetable
     https://data.gov.tw/dataset/6138
