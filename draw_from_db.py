@@ -3,7 +3,6 @@ from __future__ import annotations
 import pathlib
 import sqlite3
 from datetime import timedelta
-from itertools import groupby, tee
 from math import ceil
 from operator import itemgetter
 
@@ -18,6 +17,7 @@ TEN_MINUTE_GAP = round(60 * 10 * SECOND_GAP)
 HOUR_GAP = round(3600 * SECOND_GAP)
 PADDING = 50
 ENLARGE_GAP_RATE = 10
+FONT_HEIGHT = 12
 
 
 def min_type(min_: int) -> str:
@@ -30,10 +30,9 @@ def min_type(min_: int) -> str:
     return type_
 
 
-def draw_hour_lines(height: int, width: int, start_hour: int, hour_count: int) -> list[str]:
+def draw_hour_lines(height: int, start_hour: int, hour_count: int) -> list[str]:
     bottom_y = PADDING + height
-    font_height = 12
-    text_gap = max(min(TEN_MINUTE_GAP * 3, height), font_height + PADDING)
+    text_gap = max(min(TEN_MINUTE_GAP * 3, height), FONT_HEIGHT + PADDING)
 
     result = []
     every_ten_min_x = [
@@ -60,7 +59,7 @@ def draw_station_lines(cur: sqlite3.Cursor, width: int) -> list[str]:
     result = []
     stations = cur.fetchmany()
     while stations:
-        station_y = [(s['is_active'], round(s['y'] * ENLARGE_GAP_RATE + PADDING), s['name']) for s in stations]
+        station_y = tuple((s['is_active'], round(s['y'] * ENLARGE_GAP_RATE + PADDING), s['name']) for s in stations)
         for is_active, y, name in station_y:
             type_ = active_type[is_active]
             result.append(f'<line x1="{PADDING}" x2="{width - PADDING}" y1="{y}" y2="{y}" class="{type_}" />')
@@ -70,9 +69,10 @@ def draw_station_lines(cur: sqlite3.Cursor, width: int) -> list[str]:
     return result
 
 
-def draw_backgrond(con: sqlite3.Connection, route_name: str, height: int, width: int, start_hour: int, hour_count: int):
+def draw_backgrond(con: sqlite3.Connection, route_name: str,
+                   height: int, width: int, start_hour: int, hour_count: int) -> list[str]:
     result = []
-    result.extend(draw_hour_lines(height, width, start_hour, hour_count))
+    result.extend(draw_hour_lines(height, start_hour, hour_count))
 
     cur = con.execute(
         '''
@@ -92,7 +92,7 @@ def draw_backgrond(con: sqlite3.Connection, route_name: str, height: int, width:
     return result
 
 
-def get_time_list(con: sqlite3.Connection, code: str, route_name: str) -> list[(int, float)]:
+def get_time_list(con: sqlite3.Connection, code: str, route_name: str) -> tuple[(str, float)]:
     cur = con.execute(
         '''
         SELECT
@@ -116,7 +116,7 @@ def get_time_list(con: sqlite3.Connection, code: str, route_name: str) -> list[(
         ''',
         {'code': code, 'name': route_name}
     )
-    return [(r['x'], r['y']) for r in cur.fetchall()]
+    return tuple((r['x'], r['y']) for r in cur.fetchall())
 
 
 type_to_css = {
@@ -156,8 +156,8 @@ type_to_css = {
 def draw_train_lines(con: sqlite3.Connection, start_hour: int, train_list: tuple[str], route_name: str) -> list[str]:
     result = []
     x_offset = timedelta(hours=start_hour)
-    print(f'{len(train_list)} trains to process in "{route_name}"')
-    for i, (code, train_type) in enumerate(train_list):
+    print(f'{len(train_list)} trains to process in "{route_name}"', end='\r')
+    for count, (code, train_type) in enumerate(train_list, start=1):
         time_list = get_time_list(con, code, route_name)
         d = ' '.join(
             (f'{round((x - x_offset).total_seconds() * SECOND_GAP) + PADDING},{y * ENLARGE_GAP_RATE + PADDING}'
@@ -175,8 +175,8 @@ def draw_train_lines(con: sqlite3.Connection, start_hour: int, train_list: tuple
             </text>'''
             for i in range(0, time_span, min(time_span, 2 * TEN_MINUTE_GAP))
         ])
-        print(f'{i} / {len(train_list)}', end='\r')
-    print(f'Finish "{route_name}"')
+        print(f'{count} / {len(train_list)} trains to process in "{route_name}"', end='\r')
+    print(f'Finish "{route_name}"', end='\r')
     return result
 
 
@@ -184,7 +184,7 @@ def draw(con: sqlite3.Connection, route_name: str,
          height: int, width: int,
          start_hour: int, hour_count: int,
          train_list: tuple[str]
-         ) -> list[str]:
+         ) -> str:
     result = [
         f'''<svg
         xmlns="http://www.w3.org/2000/svg"
@@ -222,17 +222,17 @@ def draw(con: sqlite3.Connection, route_name: str,
             .tze_chiang{stroke: hsl(14, 44%, 79%)}
             .tze_chiang_text{fill: hsl(14, 44%, 79%)}
 
-            .tze_chiang_diesel{stroke: hsl(30, 100%, 100%)}
-            .tze_chiang_diesel_text{fill: hsl(30, 100%, 100%)}
+            .tze_chiang_diesel{stroke: hsl(30, 100%, 70%)}
+            .tze_chiang_diesel_text{fill: hsl(30, 100%, 70%)}
 
-            .emu1200{stroke: hsl(327, 100%, 100%); stroke-dasharray: 25,5}
-            .emu1200_text{fill: hsl(327, 100%, 100%)}
+            .emu1200{stroke: hsl(327, 100%, 80%); stroke-dasharray: 25,5}
+            .emu1200_text{fill: hsl(327, 100%, 80%)}
 
             .emu300{stroke: hsl(0, 73%, 100%); stroke-dasharray: 25,5}
             .emu300_text{fill: hsl(0, 73%, 100%)}
 
-            .chu_kuang{stroke: hsl(48, 100%, 100%)}
-            .chu_kuang_text{fill: hsl(48, 100%, 100%)}
+            .chu_kuang{stroke: hsl(48, 100%, 80%)}
+            .chu_kuang_text{fill: hsl(48, 100%, 80%)}
 
             .local{stroke: hsl(240, 100%, 80%)}
             .local_text{fill: hsl(240, 100%, 80%)}
@@ -257,11 +257,11 @@ def draw(con: sqlite3.Connection, route_name: str,
     return '\n'.join(result)
 
 
-def from_timedelta_to_hour(t: timedelta) -> int:
-    return round(t.total_seconds() // 60 // 60)
+def seconds_to_hours(t: int) -> int:
+    return round(t // 60 // 60)
 
 
-def decide_layout(con: sqlite3.Connection, route_name: str) -> (int, int, int, int, list[str]):
+def decide_layout(con: sqlite3.Connection, route_name: str) -> (int, int, int, int, tuple[str, str]):
     cur = con.execute(
         '''
         SELECT max(route_station.relative_distance) as height
@@ -277,114 +277,70 @@ def decide_layout(con: sqlite3.Connection, route_name: str) -> (int, int, int, i
 
     cur = con.execute(
         '''
+        WITH
+            blah
+        AS (
+            SELECT
+                train.code
+                ,route.name AS route_name
+                ,train_type.code AS train_type
+                ,timetable.time
+                ,timetable.pk AS timetable_pk
+                ,timetable.time - LAG(timetable.time)
+                    OVER (
+                        PARTITION BY
+                            train.code
+                            ,route.name
+                        ORDER BY
+                            train.code
+                            ,timetable.time ASC
+                            ,route.name
+                        )
+                    AS diff
+            FROM
+                timetable
+            JOIN train ON
+                timetable.train_fk = train.pk
+            JOIN train_type ON
+                train.train_type_fk = train_type.pk
+            JOIN station ON
+                timetable.station_fk = station.pk
+            JOIN route_station ON
+                station.pk = route_station.station_fk
+            JOIN route ON
+                route.pk = route_station.route_fk
+            )
         SELECT
-            timetable.time
-            ,train.code
-            ,train_type.code AS train_type
-            ,timetable.time - LAG(timetable.time)
-                OVER (PARTITION BY train.code ORDER BY train.code, timetable.time ASC) AS diff
+            MIN(blah.time) AS early
+            ,MAX(blah.time) AS late
+            ,blah.code
+            ,blah.train_type
         FROM
-            timetable
-        JOIN station ON
-            timetable.station_fk = station.pk
-        JOIN route_station ON
-            route_station.station_fk = station.pk
-        JOIN route ON
-            route.pk = route_station.route_fk
-        JOIN train ON
-            timetable.train_fk = train.pk
-        JOIN train_type ON
-            train.train_type_fk = train_type.pk
+            blah
         WHERE
-            route.name = ?
+            blah.route_name = ?
+        GROUP BY
+            blah.code
+        HAVING
+            COUNT(blah.timetable_pk) > 2
+        AND
+            MAX(blah.diff) < 3600 * 8
         ORDER BY
-            train.code
-            ,timetable.time ASC
+            blah.code;
         ''',
         (route_name,)
     )
-    # TODO better solving these by SQL statement
-    # Exclude tranfering line records can be solved by following statement
-    #
-    # SELECT
-    # ...
-    #   ,min(timetable.time) AS early
-    #   ,max(timetable.time) AS late
-    # ...
-    # GROUP BY
-    #     blah.code
-    # HAVING
-    #     COUNT(blah.timetable_pk) > 2
-    # ...
-    #
-    # Travel time could be solved by WITH and LAG(). Like the following
-    #
-    # WITH blah AS (
-    #     SELECT
-    #         train.code
-    #         ,min(timetable.time) as early
-    #         ,max(timetable.time) as late
-    #         ,timetable.pk AS timetable_pk
-    #         ,timetable.time AS t
-    #         ,route.name AS name
-    #         ,station.pk AS x
-    #         ,timetable.time - LAG(timetable.time) OVER (PARTITION BY train.code ORDER BY timetable.time ASC) AS diff
-    #     FROM
-    #         train
-    #     JOIN timetable ON
-    #         timetable.train_fk = train.pk
-    #     JOIN station ON
-    #         timetable.station_fk = station.pk
-    #     JOIN route_station ON
-    #         station.pk = route_station.station_fk
-    #     JOIN route ON
-    #         route.pk = route_station.route_fk
-    # )
-    # SELECT
-    #     blah.code
-    #     ,blah.t
-    #     ,blah.x
-    #     ,blah.diff
-    #     ,blah.early
-    #     ,blah.late
-    #     ,max(blah.diff) AS max_diff
-    # FROM blah
-    # WHERE
-    #     blah.name = ?
-    # GROUP BY
-    #     blah.code
-    # HAVING
-    #     COUNT(blah.timetable_pk) > 2
-    # ORDER BY
-    #     blah.code
-    #     ,blah.t ASC
-    #
-    # However, I don't know how to combine LAG() with aggreation function
 
-    infos = tuple((r['code'], r['time'], r['diff'], r['train_type']) for r in cur.fetchall())
-    min_times = []
-    max_times = []
-    train_list = []
-    max_travel_time = timedelta(hours=8).total_seconds()
-    for code, info in groupby(infos, key=itemgetter(0)):
-        for_diff, for_time, for_count = tee(info, 3)
-        for_train_type = next(info)
-        # HAVING COUNT(blah.timetable_pk) > 2
-        if len([*for_count]) > 2\
-                and max([r[2] for r in for_diff if r[2] is not None]) < max_travel_time:  # WITH, LAG() and WHERE
-            train_list.append((code, for_train_type[3]))
-            for i in for_time:
-                min_times.append(i[1])  # MIN(timetable.time), GROUP BY and ORDER BY
-                max_times.append(i[1])  # MAX(timetable.time), GROUP BY and ORDER BY
-    start_hour = from_timedelta_to_hour(min(min_times))
-    end_hour = from_timedelta_to_hour(max(max_times)) + 1
-
+    infos = tuple((r['early'], r['late'], r['code'], r['train_type']) for r in cur.fetchall())
+    train_list = tuple((r[2], r[3]) for r in infos)
+    start_hour = seconds_to_hours(min(infos, key=itemgetter(0))[0])
+    end_hour = seconds_to_hours(max(infos, key=itemgetter(1))[1]) + 1
     hour_count = end_hour - start_hour + 1
     width = (hour_count - 1) * HOUR_GAP + 2 * PADDING
     return height, width, start_hour, hour_count, train_list
 
 
-def get_route_names(con: sqlite3.Connection):
+def get_route_names(con: sqlite3.Connection) -> tuple[str]:
     cur = con.execute(
         '''
         SELECT
@@ -409,11 +365,11 @@ def get_route_names(con: sqlite3.Connection):
             )
         '''
     )
-    return [r['name'] for r in cur.fetchall()]
+    return tuple(r['name'] for r in cur.fetchall())
 
 
 if __name__ == '__main__':
-    print('Start')
+    print('Start', end='\r')
     con = setup_sqlite()
     with con:
         create_schema(con)
@@ -423,18 +379,19 @@ if __name__ == '__main__':
             pathlib.Path('./JSON/station.json'),
             pathlib.Path('./JSON/timetable.json'),
         )
-        print('Finish loading data')
+        print('Finish loading data', end='\r')
         route_names = get_route_names(con)
-        print(f'There are {len(route_names)} routes to process')
+        print(f'There are {len(route_names)} routes to process', end='\r')
         for i, route in enumerate(route_names, start=1):
             height, width, start_hour, hour_count, train_list = decide_layout(con, route_name=route)
 
+            result = draw(
+                con=con, route_name=route,
+                height=height, width=width,
+                start_hour=start_hour, hour_count=hour_count,
+                train_list=train_list,
+            )
             with open(f'{route}.svg', mode='w') as f:
-                f.write(draw(
-                    con=con, route_name=route,
-                    height=height, width=width,
-                    start_hour=start_hour, hour_count=hour_count,
-                    train_list=train_list,
-                ))
-            print(f'{i} / {len(route_names)}')
-    print('All done')
+                f.write(result)
+            print(f'{i} / {len(route_names)}', end='\r')
+    print('All done', end='\r')
