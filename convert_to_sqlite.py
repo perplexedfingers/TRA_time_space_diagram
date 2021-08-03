@@ -11,7 +11,7 @@ from typing import Union
 NEXT_DAY = timedelta(days=1)
 FIRST_HOUR = timedelta(hours=1)
 
-CAR_CLASS = {  # copy from developer manual
+CAR_CLASS = {  # copy from developer manual in timetable webpage
     '1101': '自強(太,障)',
     '1105': '自強(郵)',
     '1104': '自強(專)',
