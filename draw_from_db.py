@@ -8,7 +8,6 @@ from operator import itemgetter
 
 from convert_to_sqlite import create_schema, load_data_from_json, setup_sqlite
 
-# TODO use logging rather than print
 # TODO download data set utility
 
 SECOND_GAP = 0.4
@@ -17,6 +16,11 @@ HOUR_GAP = round(3600 * SECOND_GAP)
 PADDING = 50
 ENLARGE_GAP_RATE = 10
 FONT_HEIGHT = 12
+
+
+def print_(s: str):
+    print('\033[K', end='\r')  # clear_previous_print
+    print(s, end='\r')
 
 
 def min_type(min_: int) -> str:
@@ -161,7 +165,7 @@ type_to_css = {
 def draw_train_lines(con: sqlite3.Connection, start_hour: int, train_list: tuple[str], route_name: str) -> list[str]:
     result = []
     x_offset = timedelta(hours=start_hour)
-    print(f'{len(train_list)} trains to process in "{route_name}"', end='\r')
+    print_(f'{len(train_list)} trains to process in "{route_name}"')
     for count, (code, train_type) in enumerate(train_list, start=1):
         time_list = get_time_list(con, code, route_name)
         d = ' '.join(
@@ -180,8 +184,8 @@ def draw_train_lines(con: sqlite3.Connection, start_hour: int, train_list: tuple
             </text>'''
             for i in range(0, time_span, min(time_span, 2 * TEN_MINUTE_GAP))
         ])
-        print(f'{count} / {len(train_list)} trains to process in "{route_name}"', end='\r')
-    print(f'Finish "{route_name}"', end='\r')
+        print_(f'{count} / {len(train_list)} trains to process in "{route_name}"')
+    print_(f'Finish "{route_name}"')
     return result
 
 
@@ -377,7 +381,7 @@ def get_route_names(con: sqlite3.Connection) -> tuple[str]:
 
 
 if __name__ == '__main__':
-    print('Start', end='\r')
+    print_('Start to load data')
     con = setup_sqlite()
     with con:
         create_schema(con)
@@ -387,9 +391,9 @@ if __name__ == '__main__':
             pathlib.Path('./JSON/station.json'),
             pathlib.Path('./JSON/timetable.json'),
         )
-        print('Finish loading data', end='\r')
+        print_('Finish loading data')
         route_names = get_route_names(con)
-        print(f'There are {len(route_names)} routes to process', end='\r')
+        print_(f'There are {len(route_names)} routes to process')
         for i, route in enumerate(route_names, start=1):
             height, width, start_hour, hour_count, train_list = decide_layout(con, route_name=route)
 
@@ -401,5 +405,5 @@ if __name__ == '__main__':
             )
             with open(f'{route}.svg', mode='w') as f:
                 f.write(result)
-            print(f'{i} / {len(route_names)}', end='\r')
-    print('All done', end='\r')
+            print_(f'{i} / {len(route_names)} routes to go')
+    print_('All done')
