@@ -15,6 +15,7 @@ from convert_to_sqlite import create_schema, load_data_from_json, setup_sqlite
 # TODO download data set utility
 
 SECOND_GAP = 0.4
+TEN_MINUTE_GAP = round(60 * 10 * SECOND_GAP)
 HOUR_GAP = round(3600 * SECOND_GAP)
 PADDING = 50
 ENLARGE_GAP_RATE = 10
@@ -22,12 +23,12 @@ ENLARGE_GAP_RATE = 10
 
 def draw_hour_lines(height: int, width: int, start_hour: int, hour_count: int) -> list[str]:
     bottom_y = PADDING + height
-    text_gap = min(height // 7, 700)  # gap between vertical text TODO should relate with 'viewport'
-    ten_minute_gap = round(60 * 10 * SECOND_GAP)
+    font_height = 12
+    text_gap = max(min(TEN_MINUTE_GAP * 3, height), font_height + PADDING)
 
     result = []
     every_ten_min_x = [
-        PADDING + m * ten_minute_gap + i * HOUR_GAP
+        PADDING + m * TEN_MINUTE_GAP + i * HOUR_GAP
         for i in range(hour_count) for m in range(6)
     ] + [PADDING + hour_count * HOUR_GAP]  # the very last hour
     for i, x in enumerate(every_ten_min_x, start=start_hour * 6):
@@ -37,7 +38,7 @@ def draw_hour_lines(height: int, width: int, start_hour: int, hour_count: int) -
             result.append(f'<line x1="{x}" x2="{x}" y1="{PADDING}" y2="{bottom_y}" stroke="green" />')
         else:
             result.append(f'<line x1="{x}" x2="{x}" y1="{PADDING}" y2="{bottom_y}" stroke="red" />')
-        for j in range(0, ceil(height + text_gap), text_gap):
+        for j in range(0, min(ceil(height + text_gap), height + PADDING), text_gap):
             if i % 6 == 0:  # hour
                 result.append(f'<text fill="black" x="{x}" y="{PADDING - 1 + j}">{"{:0>2d}00".format(i // 6)}</text>')
             elif i % 3 == 0:  # thirty minutes
@@ -127,15 +128,16 @@ def draw_train_lines(con: sqlite3.Connection, start_hour: int, train_list: tuple
              for x, y in time_list)
         )
         result.append(f'<path id="{code}" d="M {d}" stroke="black" stroke-width="2" fill="none"></path>')
+        time_span = round((max(time_list)[0] - min(time_list)[0]).total_seconds())
         result.extend([
             f'''<text>
-            <textPath stroke="black" startOffset="{PADDING + 600 * i}" xlink:href="#{code}">
+            <textPath stroke="black" startOffset="{PADDING + i}" xlink:href="#{code}">
             <tspan dy="-3">
             {code}
             </tspan>
             </textPath>
             </text>'''
-            for i in range(0, 6)  # 600?
+            for i in range(0, time_span, min(time_span, 2 * TEN_MINUTE_GAP))
         ])
         print(f'{i} / {len(train_list)}', end='\r')
     print(f'Finish "{route_name}"')
