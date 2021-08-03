@@ -20,6 +20,16 @@ PADDING = 50
 ENLARGE_GAP_RATE = 10
 
 
+def min_type(min_: int) -> str:
+    if min_ % 6 == 0:  # hour
+        type_ = 'hour'
+    elif min_ % 3 == 0:  # thirty minutes
+        type_ = 'min30'
+    else:
+        type_ = 'min10'
+    return type_
+
+
 def draw_hour_lines(height: int, width: int, start_hour: int, hour_count: int) -> list[str]:
     bottom_y = PADDING + height
     font_height = 12
@@ -31,38 +41,31 @@ def draw_hour_lines(height: int, width: int, start_hour: int, hour_count: int) -
         for i in range(hour_count) for m in range(6)
     ] + [PADDING + hour_count * HOUR_GAP]  # the very last hour
     for i, x in enumerate(every_ten_min_x, start=start_hour * 6):
-        if i % 6 == 0:  # hour
-            result.append(f'<line x1="{x}" x2="{x}" y1="{PADDING}" y2="{bottom_y}" class="hour" />')
-        elif i % 3 == 0:  # thirty minutes
-            result.append(f'<line x1="{x}" x2="{x}" y1="{PADDING}" y2="{bottom_y}" class="min30" />')
-        else:
-            result.append(f'<line x1="{x}" x2="{x}" y1="{PADDING}" y2="{bottom_y}" class="min10" />')
+        type_ = min_type(i)
+        result.append(f'<line x1="{x}" x2="{x}" y1="{PADDING}" y2="{bottom_y}" class="{type_}" />')
         for j in range(0, min(ceil(height + text_gap), height + PADDING), text_gap):
-            if i % 6 == 0:  # hour
-                result.append(f'<text x="{x}" y="{PADDING - 1 + j}" class="hour_text">{"{:0>2d}00".format(i // 6)}</text>')
-            elif i % 3 == 0:  # thirty minutes
-                result.append(f'<text x="{x}" y="{PADDING - 1 + j}" class="min30_text">{i % 6}0</text>')
+            if type_ == 'hour':
+                text = '{:0>2d}00'.format(i // 6)
             else:
-                result.append(f'<text x="{x}" y="{PADDING - 1 + j}" class="min10_text">{i % 6}0</text>')
+                text = f'{i % 6}0'
+            result.append(f'<text x="{x}" y="{PADDING - 1 + j}" class="{type_}_text">{text}</text>')
     return result
 
 
+active_type = {True: 'station', False: 'noserv_station'}
+
+
 def draw_station_lines(cur: sqlite3.Cursor, width: int) -> list[str]:
-    result = []
     cur.arraysize = 10  # random number
+    result = []
     stations = cur.fetchmany()
     while stations:
         station_y = [(s['is_active'], round(s['y'] * ENLARGE_GAP_RATE + PADDING), s['name']) for s in stations]
         for is_active, y, name in station_y:
-            if is_active:
-                result.append(f'<line x1="{PADDING}" x2="{width - PADDING}" y1="{y}" y2="{y}" class="station" />')
-            else:
-                result.append(f'<line x1="{PADDING}" x2="{width - PADDING}" y1="{y}" y2="{y}" class="noserv_station" />')
+            type_ = active_type[is_active]
+            result.append(f'<line x1="{PADDING}" x2="{width - PADDING}" y1="{y}" y2="{y}" class="{type_}" />')
             for i in range(0, width, HOUR_GAP):
-                if is_active:
-                    result.append(f'<text x="{i}" y="{y - 5}" class="staion_text">{name}</text>')
-                else:
-                    result.append(f'<text x="{i}" y="{y - 5}" class="noserv_staion_text">{name}</text>')
+                result.append(f'<text x="{i}" y="{y - 5}" class="{type_}_text">{name}</text>')
         stations = cur.fetchmany()
     return result
 
