@@ -286,59 +286,50 @@ def decide_layout(con: sqlite3.Connection, route_name: str) -> (int, int, int, i
 
     cur = con.execute(
         '''
-        WITH
-            info
-        AS (
-            SELECT
-                train.code
-                ,route.name AS route_name
-                ,train_type.code AS train_type
-                ,timetable.time
-                ,timetable.pk AS timetable_pk
-                ,timetable.time - LAG(timetable.time)
-                    OVER (
-                        PARTITION BY
-                            train.code
-                            ,route.name
-                        ORDER BY
-                            train.code
-                            ,timetable.time ASC
-                            ,route.name
-                        )
-                    AS diff
-            FROM
-                timetable
-            JOIN train ON
-                timetable.train_fk = train.pk
-            JOIN train_type ON
-                train.train_type_fk = train_type.pk
-            JOIN station ON
-                timetable.station_fk = station.pk
-            JOIN route_station ON
-                station.pk = route_station.station_fk
-            JOIN route ON
-                route.pk = route_station.route_fk
-            )
+        WITH RECURSIVE
+            segment (train_code, train_type, time, previous, timetable_pk, next) AS (
+                SELECT train.code, train_type.code, timetable.time, timetable.previous, timetable.pk, timetable.next
+                FROM timetable
+                JOIN train ON timetable.train_fk = train.pk
+                JOIN train_type ON train.train_type_fk = train_type.pk
+                JOIN station ON timetable.station_fk = station.pk
+                JOIN route_station ON station.pk = route_station.station_fk
+                JOIN route ON route_station.route_fk = route.pk
+                WHERE route.name = :name
+            UNION
+                SELECT train.code, train_type.code, timetable.time, timetable.previous, timetable.pk, timetable.next
+                FROM timetable
+                JOIN segment ON timetable.pk = segment.timetable_pk
+                JOIN train ON timetable.train_fk = train.pk
+                JOIN train_type ON train.train_type_fk = train_type.pk
+                JOIN station ON timetable.station_fk = station.pk
+                JOIN route_station ON station.pk = route_station.station_fk
+                JOIN route ON route_station.route_fk = route.pk
+                WHERE
+                    ((timetable.previous IN (segment.timetable_pk, NULL))
+                        OR
+                    (timetable.next IN (segment.timetable_pk, NULL)))
+                AND
+                    route.name = :name
+            ORDER BY
+                timetable.time ASC
+            )  -- recursively build the traveling dots
         SELECT
-            MIN(info.time) AS early
-            ,MAX(info.time) AS late
-            ,info.code
-            ,info.train_type
+            MIN(segment.time) AS early
+            ,MAX(segment.time) AS late
+            ,segment.train_code AS code
+            ,segment.train_type AS train_type
         FROM
-            info
-        WHERE
-            info.route_name = ?
+            segment
         GROUP BY
-            info.code
+            EXISTS (SELECT NULL FROM segment AS t WHERE t.timetable_pk = segment.next) -- group segment together
+            ,segment.train_code  -- seperate the segaments by train code
         HAVING
-            COUNT(info.timetable_pk) > 2 -- at least travel once in the route
-        AND
-            MAX(info.diff) < 28800  -- 8 hours in seconds
-                                    -- Mainly exclude '145' in south bound
+            COUNT(segment.timetable_pk) > 2 -- at least travel once in the route
         ORDER BY
-            info.code;
+            segment.train_code
         ''',
-        (route_name,)
+        {'name': route_name}
     )
 
     infos = tuple((r['early'], r['late'], r['code'], r['train_type']) for r in cur.fetchall())
@@ -364,7 +355,7 @@ def get_route_names(con: sqlite3.Connection) -> tuple[str]:
         JOIN timetable ON
             timetable.station_fk = station.pk
         WHERE
-            route_station.relative_distance != 0  -- with DISTINCE, exclude routes that has no stations
+            route_station.relative_distance != 0  -- with DISTINCT, exclude routes that has no stations
         '''
     )
     return tuple(r['name'] for r in cur.fetchall())
