@@ -332,11 +332,9 @@ def decide_layout(con: sqlite3.Connection, route_name: str) -> (int, int, int, i
             info.code
         HAVING
             COUNT(info.timetable_pk) > 2 -- at least travel once in the route
-                                         -- not just passing the tranfering station
-                                         -- from the perspective of the other route
         AND
-            MAX(info.diff) < 28800  -- travle or stay for more than 8 hours
-                                    -- mainly exclude '145' go-around train in south bound
+            MAX(info.diff) < 28800  -- 8 hours in seconds
+                                    -- Mainly exclude '145' in south bound
         ORDER BY
             info.code;
         ''',
@@ -366,7 +364,7 @@ def get_route_names(con: sqlite3.Connection) -> tuple[str]:
         JOIN timetable ON
             timetable.station_fk = station.pk
         WHERE
-            route_station.relative_distance != 0  -- with DISTINCT, exclude routes that has no stations
+            route_station.relative_distance != 0  -- with DISTINCE, exclude routes that has no stations
         '''
     )
     return tuple(r['name'] for r in cur.fetchall())
