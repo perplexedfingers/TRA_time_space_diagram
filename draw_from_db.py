@@ -3,7 +3,7 @@ from __future__ import annotations
 import pathlib
 import sqlite3
 from datetime import timedelta
-from itertools import groupby, tee, zip_longest
+from itertools import groupby, tee
 from math import ceil
 from operator import itemgetter
 
@@ -152,7 +152,7 @@ def draw(con: sqlite3.Connection, route_name: str,
         xmlns="http://www.w3.org/2000/svg"
         xmlns:xlink="http://www.w3.org/1999/xlink"
         style="font-family:Tahoma"
-        width="{width}"
+        width="{width + 2 * PADDING}"
         height="{height + 2 * PADDING}">
         ''',
     ]
@@ -167,13 +167,6 @@ def draw(con: sqlite3.Connection, route_name: str,
 
 def from_timedelta_to_hour(t: timedelta) -> int:
     return round(t.total_seconds() // 60 // 60)
-
-
-def grouper(iterable, n, fillvalue=None):
-    "Collect data into fixed-length chunks or blocks"
-    # grouper('ABCDEFG', 3, 'x') --> ABC DEF Gxx"
-    args = [iter(iterable)] * n
-    return zip_longest(*args, fillvalue=fillvalue)
 
 
 def decide_layout(con: sqlite3.Connection, route_name: str) -> (int, int, int, int, list[str]):
@@ -281,14 +274,12 @@ def decide_layout(con: sqlite3.Connection, route_name: str) -> (int, int, int, i
     for code, info in groupby(infos, key=itemgetter(0)):
         for_diff, for_time, for_count = tee(info, 3)
         # HAVING COUNT(blah.timetable_pk) > 2
-        if len([*for_count]) <= 2\
-                or max([r[2] for r in for_diff if r[2] is not None]) > max_travel_time:  # LAG() with WHERE condition
-            continue
-        else:
+        if len([*for_count]) > 2\
+                and max([r[2] for r in for_diff if r[2] is not None]) < max_travel_time:  # WITH, LAG() and WHERE
             train_list.append(code)
-            for a, b in grouper(for_time, n=2):
-                min_times.append(a[1])  # min(timetable.time) as early with GROUP BY and ORDER BY
-                max_times.append(b[1])  # max(timetable.time) as late with GROUP BY and ORDER BY
+            for i in for_time:
+                min_times.append(i[1])  # MIN(timetable.time), GROUP BY and ORDER BY
+                max_times.append(i[1])  # MAX(timetable.time), GROUP BY and ORDER BY
     start_hour = from_timedelta_to_hour(min(min_times))
     end_hour = from_timedelta_to_hour(max(max_times)) + 1
 
