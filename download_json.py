@@ -33,11 +33,11 @@ if __name__ == '__main__':
     timetable_url = get_timetalbe_download_url(timetable_root_url)
 
     urls = (
-        (timetable_url, 'timetable.json'),
-        ('https://ods.railway.gov.tw/tra-ods-web/ods/download/dataResource/f0906cb8dcee4dfd9eb5f8a9a2bd0f5a'
-         'route.json'),
+        (timetable_url, 'JSON/timetable.json'),
+        ('https://ods.railway.gov.tw/tra-ods-web/ods/download/dataResource/f0906cb8dcee4dfd9eb5f8a9a2bd0f5a',
+         'JSON/route.json'),
         ('https://ods.railway.gov.tw/tra-ods-web/ods/download/dataResource/0518b833e8964d53bfea3f7691aea0ee',
-         'station.json')
+         'JSON/station.json')
     )
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
