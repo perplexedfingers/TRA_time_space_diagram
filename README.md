@@ -54,13 +54,14 @@ pip install -r requirement.txt
 ```
 
 ### To download all three needed files:
+Add `JSON` folder before download
 
 ```
 python download_json.py
 ```
 
 ### To draw diagrams
-After download needed files
+After download needed files, and add `OUTPUT` folder for the graphs
 
 ```
 python draw_from_db.py
