@@ -401,7 +401,7 @@ if __name__ == '__main__':
                 start_hour=start_hour, hour_count=hour_count,
                 train_list=train_list,
             )
-            with open(f'{route}.svg', mode='w') as f:
+            with open(f'OUTPUT/{route}.svg', mode='w') as f:
                 f.write(result)
             print_(f'{i} / {len(route_names)} routes to go')
     print_('All done')
