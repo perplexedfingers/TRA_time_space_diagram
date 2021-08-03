@@ -214,7 +214,7 @@ def fill_in_timetable(cur: sqlite3.Cursor, timetable: pathlib.Path):
         )
         for train in trains:
             cur.execute(
-                'INSERT OR IGNORE INTO train (train_type_fk, code) VALUES (:train_type_pk, :code) RETURNING train.pk',
+                'INSERT INTO train (train_type_fk, code) VALUES (:train_type_pk, :code) RETURNING train.pk',
                 {'train_type_pk': train_type_pk, 'code': train['Train']}
             )
             train_pk = cur.fetchone()['pk']
