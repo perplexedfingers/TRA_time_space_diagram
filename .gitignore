@@ -103,12 +103,7 @@ venv.bak/
 # mypy
 .mypy_cache/
 
-＃ my_setting
-.idea/
-.vscode/
+.DS_Store
 JSON/*.json
 *.svg
-log.txt
-.DS_Store
-run.sh
-play.bat
+db.sqlite

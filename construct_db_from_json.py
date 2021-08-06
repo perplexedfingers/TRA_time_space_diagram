@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import argparse
 import json
-import pathlib
 import sqlite3
 from datetime import timedelta
 from itertools import groupby
 from operator import itemgetter
+from pathlib import Path
 from typing import Union
 
 NEXT_DAY = timedelta(days=1)
@@ -133,12 +134,13 @@ def create_schema(con: sqlite3.Connection):
         ,previous REFERENCE timetable NULL
         ,next REFERENCE timetable NULL
         ,time t_time NOT NULL
+        ,order_ INTEGER NOT NULL
         );
         '''
     )
 
 
-def fill_in_stations(cur: sqlite3.Cursor, station: pathlib.Path):
+def fill_in_stations(cur: sqlite3.Cursor, station: Path):
     with station.open() as f:
         station_json = json.load(f)
     for station in station_json:
@@ -153,7 +155,7 @@ def fill_in_stations(cur: sqlite3.Cursor, station: pathlib.Path):
         )
 
 
-def fill_in_routes(cur: sqlite3.Cursor, route: pathlib.Path):
+def fill_in_routes(cur: sqlite3.Cursor, route: Path):
     with route.open() as f:
         route_json = json.load(f)
     for line_name, routes in groupby(sorted(route_json, key=itemgetter('lineName')), key=itemgetter('lineName')):
@@ -196,7 +198,7 @@ def iso_time_to_timedelta(iso: str) -> timedelta:
     return timedelta(hours=int(hour), minutes=int(minute), seconds=int(second))
 
 
-def fill_in_timetable(cur: sqlite3.Cursor, timetable: pathlib.Path):
+def fill_in_timetable(cur: sqlite3.Cursor, timetable: Path):
     with timetable.open() as f:
         timetable_json = json.load(f)
     for train_type, trains in groupby(
@@ -221,7 +223,7 @@ def fill_in_timetable(cur: sqlite3.Cursor, timetable: pathlib.Path):
             over_night_station = train['OverNightStn']
             previous = None
             start_over_night_route = False
-            for time_info in sorted(train['TimeInfos'], key=get_order):
+            for time_info in train['TimeInfos']:
                 station_code = time_info['Station']
                 cur.execute(
                     'SELECT pk FROM station WHERE code=?',
@@ -229,6 +231,7 @@ def fill_in_timetable(cur: sqlite3.Cursor, timetable: pathlib.Path):
                 station_pk = cur.fetchone()['pk']
                 for key in ('ARRTime', 'DEPTime'):
                     time_ = iso_time_to_timedelta(time_info[key])
+                    order = get_order(time_info)
                     if station_code == over_night_station:
                         start_over_night_route = True
                         # it seems that no train would travel/stay for
@@ -236,19 +239,25 @@ def fill_in_timetable(cur: sqlite3.Cursor, timetable: pathlib.Path):
                         # so we have this hack
                         if time_ < FIRST_HOUR:
                             time_ += NEXT_DAY
-                    elif start_over_night_route:
+                    elif start_over_night_route\
+                            or (order == len(train['TimeInfos']) and key == 'DEPTime'
+                                and NEXT_DAY - iso_time_to_timedelta(time_info['ARRTime']) < timedelta(minutes=5)
+                                and time_ < timedelta(minutes=5)):
+                        # arrive at the last stop within 5 minutes before midnight,
+                        # and stay after midnight for at most 5 minutes
                         time_ += NEXT_DAY
                     cur.execute(
                         '''
                         INSERT INTO
                             timetable
-                            (station_fk, train_fk, time, previous)
+                            (station_fk, train_fk, time, previous, order_)
                         VALUES
-                            (:station_pk, :train_pk, :time, :previous)
+                            (:station_pk, :train_pk, :time, :previous, :order)
                         RETURNING
                             timetable.pk
                         ''',
-                        {'station_pk': station_pk, 'train_pk': train_pk, 'time': time_, 'previous': previous}
+                        {'station_pk': station_pk, 'train_pk': train_pk,
+                         'time': time_, 'previous': previous, 'order': order}
                     )
                     current = cur.fetchone()['pk']
                     if previous:
@@ -288,9 +297,8 @@ def patch_stations(cur):
     )
 
 
-def load_data_from_json(
-    con: sqlite3.Connection, route: pathlib.Path,
-        station: pathlib.Path, timetable: pathlib.Path):
+def load_data_from_json(con: sqlite3.Connection, route: Path,
+                        station: Path, timetable: Path):
     cur = con.cursor()
     # Due to database schema, must be in this order
     fill_in_stations(cur, station)
@@ -315,7 +323,7 @@ def convert_bool(b: bytes) -> bool:
     return bool(b)
 
 
-def setup_sqlite(db_location: str = ':memory:') -> sqlite3.Connection:
+def setup_sqlite(db_location: str) -> sqlite3.Connection:
     sqlite3.register_adapter(timedelta, adapt_time)
     sqlite3.register_converter('t_time', convert_time)
     sqlite3.register_adapter(bool, adapt_bool)
@@ -325,13 +333,44 @@ def setup_sqlite(db_location: str = ':memory:') -> sqlite3.Connection:
     return con
 
 
+def get_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description='Construt database from downloaded JSON to specified location',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument(
+        '-d',
+        type=str, dest='db', default='db.sqlite',
+        help='Output database file name')
+
+    parser.add_argument(
+        '-I',
+        default=Path('JSON'), type=Path, dest='input_folder',
+        help='Input folder')
+    parser.add_argument(
+        '-t',
+        default='timetable', type=str, dest='timetable_name',
+        help='File name for timetable. No file extension needed, because it has to be JSON')
+    parser.add_argument(
+        '-s',
+        default='station', type=str, dest='station_name',
+        help='File name for station information. No file extension needed, because it has to be JSON')
+    parser.add_argument(
+        '-r',
+        default='route', type=str, dest='route_name',
+        help='File name for route information. No file extension needed, because it has to be JSON')
+    return parser
+
+
 if __name__ == '__main__':
-    con = setup_sqlite()
+    parser = get_arg_parser()
+    args = parser.parse_args()
+
+    con = setup_sqlite(args.db)
     with con:
         create_schema(con)
         load_data_from_json(
-            con,
-            pathlib.Path('./JSON/route.json'),
-            pathlib.Path('./JSON/station.json'),
-            pathlib.Path('./JSON/timetable.json'),
+            con=con,
+            route=args.input_folder / f'{args.route_name}.json',
+            station=args.input_folder / f'{args.station_name}.json',
+            timetable=args.input_folder / f'{args.timetable_name}.json',
         )
