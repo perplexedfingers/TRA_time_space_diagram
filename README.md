@@ -54,14 +54,14 @@ pip install -r requirement.txt
 ```
 
 ### To download all three needed files:
-Add `JSON` folder before download
+The downloaded files would be in `JSON`
 
 ```
 python download_json.py
 ```
 
 ### To draw diagrams
-After download needed files, and add `OUTPUT` folder for the graphs
+After download needed files
 
 ```
 python draw_from_db.py
@@ -70,7 +70,9 @@ python draw_from_db.py
 This would
 * Set up a SQLite database in the memory
 * Load the data
-* Query from the database and draw the SVG with built-in CSS
+* Query from the database
+* Draw the SVG with built-in CSS
+* Output the SVG to `OUTPUT`
 
 ### To ONLY build the database
 After download needed files
@@ -80,8 +82,8 @@ python convert_to_sqlite.py
 ```
 
 This would
-* Set up a SQLite database in `db.sqlite`
-* Store the data
+* Set up a SQLite database as `db.sqlite` file
+* Store the data into database
 
 You may change the parameter to keep the database as a file
 
