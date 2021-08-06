@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import argparse
 import json
-import pathlib
 import sqlite3
 from datetime import timedelta
 from itertools import groupby
 from operator import itemgetter
+from pathlib import Path
 from typing import Union
 
 NEXT_DAY = timedelta(days=1)
@@ -139,7 +140,7 @@ def create_schema(con: sqlite3.Connection):
     )
 
 
-def fill_in_stations(cur: sqlite3.Cursor, station: pathlib.Path):
+def fill_in_stations(cur: sqlite3.Cursor, station: Path):
     with station.open() as f:
         station_json = json.load(f)
     for station in station_json:
@@ -154,7 +155,7 @@ def fill_in_stations(cur: sqlite3.Cursor, station: pathlib.Path):
         )
 
 
-def fill_in_routes(cur: sqlite3.Cursor, route: pathlib.Path):
+def fill_in_routes(cur: sqlite3.Cursor, route: Path):
     with route.open() as f:
         route_json = json.load(f)
     for line_name, routes in groupby(sorted(route_json, key=itemgetter('lineName')), key=itemgetter('lineName')):
@@ -197,7 +198,7 @@ def iso_time_to_timedelta(iso: str) -> timedelta:
     return timedelta(hours=int(hour), minutes=int(minute), seconds=int(second))
 
 
-def fill_in_timetable(cur: sqlite3.Cursor, timetable: pathlib.Path):
+def fill_in_timetable(cur: sqlite3.Cursor, timetable: Path):
     with timetable.open() as f:
         timetable_json = json.load(f)
     for train_type, trains in groupby(
@@ -296,9 +297,8 @@ def patch_stations(cur):
     )
 
 
-def load_data_from_json(
-    con: sqlite3.Connection, route: pathlib.Path,
-        station: pathlib.Path, timetable: pathlib.Path):
+def load_data_from_json(con: sqlite3.Connection, route: Path,
+                        station: Path, timetable: Path):
     cur = con.cursor()
     # Due to database schema, must be in this order
     fill_in_stations(cur, station)
@@ -323,7 +323,7 @@ def convert_bool(b: bytes) -> bool:
     return bool(b)
 
 
-def setup_sqlite(db_location: str = ':memory:') -> sqlite3.Connection:
+def setup_sqlite(db_location: str) -> sqlite3.Connection:
     sqlite3.register_adapter(timedelta, adapt_time)
     sqlite3.register_converter('t_time', convert_time)
     sqlite3.register_adapter(bool, adapt_bool)
@@ -333,13 +333,44 @@ def setup_sqlite(db_location: str = ':memory:') -> sqlite3.Connection:
     return con
 
 
+def get_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description='Construt database from downloaded JSON to specified location',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument(
+        '-d',
+        type=str, dest='db', default='db.sqlite',
+        help='Output database file name')
+
+    parser.add_argument(
+        '-I',
+        default=Path('JSON'), type=Path, dest='input_folder',
+        help='Input folder')
+    parser.add_argument(
+        '-t',
+        default='timetable', type=str, dest='timetable_name',
+        help='File name for timetable. No file extension needed, because it has to be JSON')
+    parser.add_argument(
+        '-s',
+        default='station', type=str, dest='station_name',
+        help='File name for station information. No file extension needed, because it has to be JSON')
+    parser.add_argument(
+        '-r',
+        default='route', type=str, dest='route_name',
+        help='File name for route information. No file extension needed, because it has to be JSON')
+    return parser
+
+
 if __name__ == '__main__':
-    con = setup_sqlite('db.sqlite')
+    parser = get_arg_parser()
+    args = parser.parse_args()
+
+    con = setup_sqlite(args.db)
     with con:
         create_schema(con)
         load_data_from_json(
-            con,
-            pathlib.Path('./JSON/route.json'),
-            pathlib.Path('./JSON/station.json'),
-            pathlib.Path('./JSON/timetable.json'),
+            con=con,
+            route=args.input_folder / f'{args.route_name}.json',
+            station=args.input_folder / f'{args.station_name}.json',
+            timetable=args.input_folder / f'{args.timetable_name}.json',
         )

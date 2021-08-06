@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import pathlib
+import argparse
 import sqlite3
 from collections import namedtuple
 from datetime import timedelta
@@ -8,8 +8,10 @@ from functools import reduce
 from itertools import groupby
 from math import ceil
 from operator import add, attrgetter
+from pathlib import Path
 
-from convert_to_sqlite import create_schema, load_data_from_json, setup_sqlite
+from construct_db_from_json import (create_schema, load_data_from_json,
+                                    setup_sqlite)
 
 SECOND_GAP = 0.4
 TEN_MINUTE_GAP = round(60 * 10 * SECOND_GAP)
@@ -398,17 +400,53 @@ def get_route_names(con: sqlite3.Connection) -> tuple[str]:
     return tuple(r['name'] for r in cur.fetchall())
 
 
+def get_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description='Form SVG from either downloaded JSON or prepared sqlite database',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument(
+        '-d',
+        type=str, dest='db', default=':memory:',
+        help='Input database file name')
+
+    parser.add_argument(
+        '-I',
+        default=Path('JSON'), type=Path, dest='input_folder',
+        help='Input folder')
+    parser.add_argument(
+        '-t',
+        default='timetable', type=str, dest='timetable_name',
+        help='File name for timetable. No file extension needed, because it has to be JSON')
+    parser.add_argument(
+        '-s',
+        default='station', type=str, dest='station_name',
+        help='File name for station information. No file extension needed, because it has to be JSON')
+    parser.add_argument(
+        '-r',
+        default='route', type=str, dest='route_name',
+        help='File name for route information. No file extension needed, because it has to be JSON')
+    parser.add_argument(
+        '-O',
+        default='OUTPUT', type=str, dest='output_folder',
+        help='Output folder')
+    return parser
+
+
 if __name__ == '__main__':
+    parser = get_arg_parser()
+    args = parser.parse_args()
+
     print_('Start to load data')
-    con = setup_sqlite()
+    con = setup_sqlite(args.db)
     with con:
-        create_schema(con)
-        load_data_from_json(
-            con,
-            pathlib.Path('./JSON/route.json'),
-            pathlib.Path('./JSON/station.json'),
-            pathlib.Path('./JSON/timetable.json'),
-        )
+        if not Path(args.db).exists():
+            create_schema(con)
+            load_data_from_json(
+                con=con,
+                route=args.input_folder / f'{args.route_name}.json',
+                station=args.input_folder / f'{args.station_name}.json',
+                timetable=args.input_folder / f'{args.timetable_name}.json',
+            )
         print_('Finish loading data')
         route_names = get_route_names(con)
         print_(f'There are {len(route_names)} routes to process')
@@ -420,7 +458,7 @@ if __name__ == '__main__':
                 start_hour=start_hour, hour_count=hour_count,
                 segments=segments,
             )
-            with open(f'OUTPUT/{route}.svg', mode='w') as f:
+            with open(f'{args.output_folder}/{route}.svg', mode='w') as f:
                 f.write(result)
             print_(f'{i} / {len(route_names)} routes to go')
     print_('All done')
