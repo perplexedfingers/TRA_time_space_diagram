@@ -60,25 +60,11 @@ The downloaded files would be in `JSON`
 python download_json.py
 ```
 
-### To draw diagrams
-After download needed files
-
-```
-python draw_from_db.py
-```
-
-This would
-* Set up a SQLite database in the memory
-* Load the data
-* Query from the database
-* Draw the SVG with built-in CSS
-* Output the SVG to `OUTPUT`
-
 ### To ONLY build the database
 After download needed files
 
 ```
-python convert_to_sqlite.py
+python construct_db_from_json.py
 ```
 
 This would
@@ -86,6 +72,23 @@ This would
 * Store the data into database
 
 You may change the parameter to keep the database as a file
+
+### To draw diagrams
+After download needed files
+
+```
+python from_svg.py
+```
+
+This would
+* Set up a SQLite database in the memory
+* Load the data
+    OR
+* Use a prepared database
+
+* Query from the database
+* Prepare the SVG with built-in CSS
+* Save the SVG to `OUTPUT`
 
 > 附註：台鐵每日均提供當日至 45 天內每日之時刻表資料，以 JSON 格式提供。
 
