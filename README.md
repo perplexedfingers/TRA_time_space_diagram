@@ -80,8 +80,8 @@ python convert_to_sqlite.py
 ```
 
 This would
-* Set up a SQLite database in the memory
-* Load the data
+* Set up a SQLite database in `db.sqlite`
+* Store the data
 
 You may change the parameter to keep the database as a file
 

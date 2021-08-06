@@ -326,7 +326,7 @@ def setup_sqlite(db_location: str = ':memory:') -> sqlite3.Connection:
 
 
 if __name__ == '__main__':
-    con = setup_sqlite()
+    con = setup_sqlite('db.sqlite')
     with con:
         create_schema(con)
         load_data_from_json(
