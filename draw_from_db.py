@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import pathlib
 import sqlite3
+from collections import namedtuple
 from datetime import timedelta
+from functools import reduce
+from itertools import groupby
 from math import ceil
-from operator import itemgetter
+from operator import add, attrgetter
 
 from convert_to_sqlite import create_schema, load_data_from_json, setup_sqlite
 
@@ -31,7 +34,7 @@ def min_type(min_: int) -> str:
     return type_
 
 
-def draw_hour_lines(height: int, start_hour: int, hour_count: int) -> list[str]:
+def form_hour_lines(height: int, start_hour: int, hour_count: int) -> list[str]:
     bottom_y = PADDING + height
     text_gap = max(min(TEN_MINUTE_GAP * 3, height), FONT_HEIGHT + PADDING)
 
@@ -55,7 +58,7 @@ def draw_hour_lines(height: int, start_hour: int, hour_count: int) -> list[str]:
 active_type = {True: 'station', False: 'noserv_station'}
 
 
-def draw_station_lines(cur: sqlite3.Cursor, width: int) -> list[str]:
+def form_station_lines(cur: sqlite3.Cursor, width: int) -> list[str]:
     cur.arraysize = 10  # random number
     result = []
     stations = cur.fetchmany()
@@ -70,10 +73,10 @@ def draw_station_lines(cur: sqlite3.Cursor, width: int) -> list[str]:
     return result
 
 
-def draw_backgrond(con: sqlite3.Connection, route_name: str,
-                   height: int, width: int, start_hour: int, hour_count: int) -> list[str]:
+def form_grid(con: sqlite3.Connection, route_name: str,
+              height: int, width: int, start_hour: int, hour_count: int) -> list[str]:
     result = []
-    result.extend(draw_hour_lines(height, start_hour, hour_count))
+    result.extend(form_hour_lines(height, start_hour, hour_count))
 
     cur = con.execute(
         '''
@@ -94,11 +97,13 @@ def draw_backgrond(con: sqlite3.Connection, route_name: str,
         ''',
         (route_name,)
     )
-    result.extend(draw_station_lines(cur, width))
+    result.extend(form_station_lines(cur, width))
     return result
 
 
-def get_time_list(con: sqlite3.Connection, code: str, route_name: str) -> tuple[(str, float)]:
+def get_time_list(con: sqlite3.Connection,
+                  code: str, route_name: str,
+                  from_: int, to: int) -> tuple[(str, float)]:
     cur = con.execute(
         '''
         SELECT
@@ -118,10 +123,13 @@ def get_time_list(con: sqlite3.Connection, code: str, route_name: str) -> tuple[
             route.name = :name
         AND
             train.code = :code
+        AND
+            timetable.order_ BETWEEN :from AND :to
         ORDER BY
             timetable.time ASC
         ''',
-        {'code': code, 'name': route_name}
+        {'code': code, 'name': route_name,
+         'from': from_, 'to': to}
     )
     return tuple((r['x'], r['y']) for r in cur.fetchall())
 
@@ -160,38 +168,49 @@ type_to_css = {
 }
 
 
-def draw_train_lines(con: sqlite3.Connection, start_hour: int, train_list: tuple[str], route_name: str) -> list[str]:
+def form_train_lines(con: sqlite3.Connection, start_hour: int,
+                     segments: dict[tuple[str, str], tuple[tuple[int, int]]],
+                     route_name: str) -> list[str]:
     result = []
     x_offset = timedelta(hours=start_hour)
-    print_(f'{len(train_list)} trains to process in "{route_name}"')
-    for count, (code, train_type) in enumerate(train_list, start=1):
-        time_list = get_time_list(con, code, route_name)
-        d = ' '.join(
-            (f'{round((x - x_offset).total_seconds() * SECOND_GAP) + PADDING},{y * ENLARGE_GAP_RATE + PADDING}'
-             for x, y in time_list)
-        )
-        result.append(f'<path id="{code}" d="M {d}" class="{type_to_css[train_type]}"></path>')
-        time_span = round((max(time_list)[0] - min(time_list)[0]).total_seconds())
-        result.extend([
-            f'''<text>
-            <textPath startOffset="{PADDING + i}" xlink:href="#{code}" class="{type_to_css[train_type]}_text">
-            <tspan dy="-3">
-            {code}
-            </tspan>
-            </textPath>
-            </text>'''
-            for i in range(0, time_span, min(time_span, 2 * TEN_MINUTE_GAP))
-        ])
-        print_(f'{count} / {len(train_list)} trains to process in "{route_name}"')
+    count = 1
+    amount = reduce(add, tuple(len(tuple(i for i in s)) for s in segments.values()), 0)
+    print_(f'{amount} segments to process in "{route_name}"')
+    for (code, train_type), _segments in segments.items():
+        for from_, to in _segments:
+            time_list = get_time_list(con, code, route_name, from_, to)
+            d = ' '.join(
+                (f'{round((x - x_offset).total_seconds() * SECOND_GAP) + PADDING},{y * ENLARGE_GAP_RATE + PADDING}'
+                 for x, y in time_list)
+            )
+            result.append(f'<path id="{code}" d="M {d}" class="{type_to_css[train_type]}"></path>')
+            time_span = round((max(time_list)[0] - min(time_list)[0]).total_seconds())
+            result.extend([
+                f'''
+                <text>
+                    <textPath
+                      startOffset="{PADDING + i}"
+                      xlink:href="#{code}"
+                      class="{type_to_css[train_type]}_text">
+                        <tspan dy="-3">
+                            {code}
+                        </tspan>
+                    </textPath>
+                </text>
+                '''
+                for i in range(0, time_span, min(time_span, 2 * TEN_MINUTE_GAP))
+            ])
+            print_(f'{count} / {amount} segments to process in "{route_name}"')
+            count += 1
     print_(f'Finish "{route_name}"')
     return result
 
 
-def draw(con: sqlite3.Connection, route_name: str,
-         height: int, width: int,
-         start_hour: int, hour_count: int,
-         train_list: tuple[str]
-         ) -> str:
+def form_svg(con: sqlite3.Connection, route_name: str,
+             height: int, width: int,
+             start_hour: int, hour_count: int,
+             segments: dict[tuple[str, str], tuple[tuple[int, int]]]
+             ) -> str:
     result = [
         f'''<svg
         xmlns="http://www.w3.org/2000/svg"
@@ -256,9 +275,9 @@ def draw(con: sqlite3.Connection, route_name: str,
         '''
     ]
 
-    result.extend(draw_backgrond(con, route_name, height, width, start_hour, hour_count))
+    result.extend(form_grid(con, route_name, height, width, start_hour, hour_count))
 
-    result.extend(draw_train_lines(con, start_hour=start_hour, train_list=train_list, route_name=route_name))
+    result.extend(form_train_lines(con, start_hour=start_hour, segments=segments, route_name=route_name))
 
     result.append('</svg>')
     return '\n'.join(result)
@@ -266,6 +285,13 @@ def draw(con: sqlite3.Connection, route_name: str,
 
 def seconds_to_hours(t: int) -> int:
     return round(t // 60 // 60)
+
+
+def get_code_n_train_type(t: tuple[str, str, int, int, int, int]) -> tuple[str, str]:
+    return (t[2], t[3])
+
+
+Info = namedtuple('Info', ['early', 'late', 'code', 'train_type', 'from_', 'to'])
 
 
 def decide_layout(con: sqlite3.Connection, route_name: str) -> (int, int, int, int, tuple[str, str]):
@@ -287,58 +313,68 @@ def decide_layout(con: sqlite3.Connection, route_name: str) -> (int, int, int, i
     cur = con.execute(
         '''
         WITH RECURSIVE
-            segment (train_code, train_type, time, previous, timetable_pk, next) AS (
-                SELECT train.code, train_type.code, timetable.time, timetable.previous, timetable.pk, timetable.next
-                FROM timetable
-                JOIN train ON timetable.train_fk = train.pk
+            segment (code, train_type, x, y, previous, current, order_, group_) AS (
+                SELECT
+                    train.code ,train_type.code ,_t.time ,route_station.relative_distance
+                    ,_t.previous ,_t.pk ,_t.order_ ,_t.pk
+                FROM timetable AS _t
+                JOIN train ON _t.train_fk = train.pk
                 JOIN train_type ON train.train_type_fk = train_type.pk
-                JOIN station ON timetable.station_fk = station.pk
-                JOIN route_station ON station.pk = route_station.station_fk
-                JOIN route ON route_station.route_fk = route.pk
-                WHERE route.name = :name
-            UNION
-                SELECT train.code, train_type.code, timetable.time, timetable.previous, timetable.pk, timetable.next
-                FROM timetable
-                JOIN segment ON timetable.pk = segment.timetable_pk
-                JOIN train ON timetable.train_fk = train.pk
-                JOIN train_type ON train.train_type_fk = train_type.pk
-                JOIN station ON timetable.station_fk = station.pk
+                JOIN station ON _t.station_fk = station.pk
                 JOIN route_station ON station.pk = route_station.station_fk
                 JOIN route ON route_station.route_fk = route.pk
                 WHERE
-                    ((timetable.previous IN (segment.timetable_pk, NULL))
+                    (
+                        _t.previous ISNULL  -- the very first stop
                         OR
-                    (timetable.next IN (segment.timetable_pk, NULL)))
-                AND
-                    route.name = :name
-            ORDER BY
-                timetable.time ASC
-            )  -- recursively build the traveling dots
+                        NOT EXISTS (  -- the previous stop is not on the same route
+                            SELECT NULL FROM timetable AS t
+                            JOIN station AS st ON t.station_fk = st.pk
+                            JOIN route_station AS rs ON st.pk = rs.station_fk
+                            JOIN route AS ro ON rs.route_fk = ro.pk
+                            WHERE ro.name = :name AND t.pk = _t.previous)
+                    )
+                    AND route.name = :name
+                UNION
+                    SELECT
+                        train.code, train_type.code, timetable.time, route_station.relative_distance,
+                        timetable.previous, timetable.pk, timetable.order_, segment.group_
+                    FROM segment
+                    JOIN timetable ON timetable.previous = segment.current
+                    JOIN train ON timetable.train_fk = train.pk
+                    JOIN train_type ON train.train_type_fk = train_type.pk
+                    JOIN station ON timetable.station_fk = station.pk
+                    JOIN route_station ON station.pk = route_station.station_fk
+                    JOIN route ON route_station.route_fk = route.pk
+                    WHERE
+                        route.name = :name
+            )
         SELECT
-            MIN(segment.time) AS early
-            ,MAX(segment.time) AS late
-            ,segment.train_code AS code
-            ,segment.train_type AS train_type
+            code, train_type,
+            MIN(x) AS early, MAX(x) AS late,
+            MIN(order_) AS from_, MAX(order_) AS to_
         FROM
             segment
         GROUP BY
-            EXISTS (SELECT NULL FROM segment AS t WHERE t.timetable_pk = segment.next) -- group segment together
-            ,segment.train_code  -- seperate the segaments by train code
+            segment.code, segment.group_
         HAVING
-            COUNT(segment.timetable_pk) > 2 -- at least travel once in the route
-        ORDER BY
-            segment.train_code
+            COUNT(segment.current) > 2
         ''',
         {'name': route_name}
     )
-
-    infos = tuple((r['early'], r['late'], r['code'], r['train_type']) for r in cur.fetchall())
-    train_list = tuple((r[2], r[3]) for r in infos)
-    start_hour = seconds_to_hours(min(infos, key=itemgetter(0))[0])
-    end_hour = seconds_to_hours(max(infos, key=itemgetter(1))[1]) + 1
+    infos = tuple(
+        Info(early=r['early'], late=r['late'],
+             code=r['code'], train_type=r['train_type'],
+             from_=r['from_'], to=r['to_'])
+        for r in cur.fetchall())
+    segments = {key: tuple(tuple((row.from_, row.to)) for row in r)
+                for key, r in groupby(sorted(infos, key=get_code_n_train_type),
+                                      key=get_code_n_train_type)}
+    start_hour = seconds_to_hours(min(infos, key=attrgetter('early')).early)
+    end_hour = seconds_to_hours(max(infos, key=attrgetter('late')).late) + 1
     hour_count = end_hour - start_hour + 1
     width = (hour_count - 1) * HOUR_GAP + 2 * PADDING
-    return height, width, start_hour, hour_count, train_list
+    return height, width, start_hour, hour_count, segments
 
 
 def get_route_names(con: sqlite3.Connection) -> tuple[str]:
@@ -355,7 +391,8 @@ def get_route_names(con: sqlite3.Connection) -> tuple[str]:
         JOIN timetable ON
             timetable.station_fk = station.pk
         WHERE
-            route_station.relative_distance != 0  -- with DISTINCT, exclude routes that has no stations
+            route_station.relative_distance != 0
+            -- with DISTINCT, exclude routes that has no stations
         '''
     )
     return tuple(r['name'] for r in cur.fetchall())
@@ -376,13 +413,12 @@ if __name__ == '__main__':
         route_names = get_route_names(con)
         print_(f'There are {len(route_names)} routes to process')
         for i, route in enumerate(route_names, start=1):
-            height, width, start_hour, hour_count, train_list = decide_layout(con, route_name=route)
-
-            result = draw(
+            height, width, start_hour, hour_count, segments = decide_layout(con, route_name=route)
+            result = form_svg(
                 con=con, route_name=route,
                 height=height, width=width,
                 start_hour=start_hour, hour_count=hour_count,
-                train_list=train_list,
+                segments=segments,
             )
             with open(f'OUTPUT/{route}.svg', mode='w') as f:
                 f.write(result)

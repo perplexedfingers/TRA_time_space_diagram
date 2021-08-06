@@ -133,6 +133,7 @@ def create_schema(con: sqlite3.Connection):
         ,previous REFERENCE timetable NULL
         ,next REFERENCE timetable NULL
         ,time t_time NOT NULL
+        ,order_ INTEGER NOT NULL
         );
         '''
     )
@@ -221,7 +222,7 @@ def fill_in_timetable(cur: sqlite3.Cursor, timetable: pathlib.Path):
             over_night_station = train['OverNightStn']
             previous = None
             start_over_night_route = False
-            for time_info in sorted(train['TimeInfos'], key=get_order):
+            for time_info in train['TimeInfos']:
                 station_code = time_info['Station']
                 cur.execute(
                     'SELECT pk FROM station WHERE code=?',
@@ -229,6 +230,7 @@ def fill_in_timetable(cur: sqlite3.Cursor, timetable: pathlib.Path):
                 station_pk = cur.fetchone()['pk']
                 for key in ('ARRTime', 'DEPTime'):
                     time_ = iso_time_to_timedelta(time_info[key])
+                    order = get_order(time_info)
                     if station_code == over_night_station:
                         start_over_night_route = True
                         # it seems that no train would travel/stay for
@@ -236,19 +238,25 @@ def fill_in_timetable(cur: sqlite3.Cursor, timetable: pathlib.Path):
                         # so we have this hack
                         if time_ < FIRST_HOUR:
                             time_ += NEXT_DAY
-                    elif start_over_night_route:
+                    elif start_over_night_route\
+                            or (order == len(train['TimeInfos']) and key == 'DEPTime'
+                                and NEXT_DAY - iso_time_to_timedelta(time_info['ARRTime']) < timedelta(minutes=5)
+                                and time_ < timedelta(minutes=5)):
+                        # arrive at the last stop within 5 minutes before midnight,
+                        # and stay after midnight for at most 5 minutes
                         time_ += NEXT_DAY
                     cur.execute(
                         '''
                         INSERT INTO
                             timetable
-                            (station_fk, train_fk, time, previous)
+                            (station_fk, train_fk, time, previous, order_)
                         VALUES
-                            (:station_pk, :train_pk, :time, :previous)
+                            (:station_pk, :train_pk, :time, :previous, :order)
                         RETURNING
                             timetable.pk
                         ''',
-                        {'station_pk': station_pk, 'train_pk': train_pk, 'time': time_, 'previous': previous}
+                        {'station_pk': station_pk, 'train_pk': train_pk,
+                         'time': time_, 'previous': previous, 'order': order}
                     )
                     current = cur.fetchone()['pk']
                     if previous:
