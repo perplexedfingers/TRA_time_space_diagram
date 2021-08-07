@@ -21,10 +21,21 @@ def get_timetalbe_download_url(root_url: str) -> str:
     return json_file_url
 
 
-def download_and_save(url: str, path_: Path):
+def _download_and_save(url: str, path_: Path):
     with urlopen(url) as f:
         dumped_json = json.dumps(json.load(f), indent=4, ensure_ascii=False)
         path_.write_text(dumped_json, encoding='utf-8', errors='strict')
+
+
+def download_and_save(urls: tuple[str, str]):
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+        future_to_filename = {executor.submit(_download_and_save, url, path_): path_ for url, path_ in urls}
+        for future in concurrent.futures.as_completed(future_to_filename):
+            fn = future_to_filename[future]
+            try:
+                future.result()
+            except Exception as exc:
+                print('%r generated an exception: %s' % (fn, exc))
 
 
 def get_arg_parser() -> argparse.ArgumentParser:
@@ -102,11 +113,4 @@ if __name__ == '__main__':
              Path(f'{args.output_folder}/{args.station_name}.json'))
         )
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-        future_to_filename = {executor.submit(download_and_save, url, path_): path_ for url, path_ in urls}
-        for future in concurrent.futures.as_completed(future_to_filename):
-            fn = future_to_filename[future]
-            try:
-                future.result()
-            except Exception as exc:
-                print('%r generated an exception: %s' % (fn, exc))
+    download_and_save(urls)
