@@ -1,0 +1,122 @@
+line {
+  stroke-width: 0.3;
+}
+
+line.hour {
+  stroke: black;
+}
+text.hour {
+  fill: black;
+}
+
+line.min30 {
+  stroke: darkblue;
+}
+text.min30 {
+  fill: grey;
+}
+
+line.min10 {
+  stroke: slateblue;
+}
+text.min10 {
+  fill: lightgrey;
+}
+
+line.station {
+  stroke: black;
+}
+text.station {
+  fill: black;
+}
+
+line.noserv_station {
+  stroke: grey;
+}
+text.noserv_station {
+  fill: grey;
+}
+
+path {
+  stroke-width: 2;
+  fill: none;
+}
+
+path.taroko {
+  stroke: hsl(300, 0%, 65%);
+}
+textPath.taroko {
+  fill: hsl(300, 0%, 65%);
+}
+
+path.puyuma {
+  stroke: red;
+}
+textPath.puyuma {
+  fill: red;
+}
+
+path.tze_chiang {
+  stroke: hsl(14, 44%, 79%);
+}
+textPath.tze_chiang {
+  fill: hsl(14, 44%, 79%);
+}
+
+path.tze_chiang_diesel {
+  stroke: hsl(30, 100%, 70%);
+}
+textPath.tze_chiang_diesel {
+  fill: hsl(30, 100%, 70%);
+}
+
+path.emu1200 {
+  stroke: hsl(327, 100%, 80%);
+  stroke-dasharray: 25,5;
+}
+textPath.emu1200 {
+  fill: hsl(327, 100%, 80%);
+}
+
+path.emu300 {
+  stroke: hsl(0, 73%, 100%);
+  stroke-dasharray: 25,5;
+}
+textPath.emu300 {
+  fill: hsl(0, 73%, 100%);
+}
+
+path.chu_kuang {
+  stroke: hsl(48, 100%, 80%);
+}
+textPath.chu_kuang {
+  fill: hsl(48, 100%, 80%);
+}
+
+path.local {
+  stroke: hsl(240, 100%, 80%);
+}
+textPath.local {
+  fill: hsl(240, 100%, 80%);
+}
+
+path.fu_hsing {
+  stroke: hsl(220, 49%, 86%);
+}
+textPath.fu_hsing {
+  fill: hsl(220, 49%, 86%);
+}
+
+path.ordinary {
+  stroke: black;
+}
+textPath.ordinary {
+  fill: black;
+}
+
+path.special {
+  stroke: hsl(120, 70%, 100%);
+}
+textPath.special {
+  fill: hsl(120, 70%, 100%);
+}

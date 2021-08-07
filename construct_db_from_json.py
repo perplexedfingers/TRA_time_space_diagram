@@ -3,14 +3,13 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
+from collections import namedtuple
 from datetime import timedelta
-from itertools import groupby
+from functools import partial, reduce
+from itertools import chain, filterfalse, groupby, tee
 from operator import itemgetter
 from pathlib import Path
-from typing import Union
-
-NEXT_DAY = timedelta(days=1)
-FIRST_HOUR = timedelta(hours=1)
+from typing import Callable, Generator, Union
 
 CAR_CLASS = {  # copy from developer manual in timetable webpage
     '1101': '自強(太,障)',
@@ -189,13 +188,97 @@ def fill_in_routes(cur: sqlite3.Cursor, route: Path):
                 )
 
 
-def get_order(item) -> int:
+def get_order(item: dict[str, str]) -> int:
     return int(item['Order'])
 
 
 def iso_time_to_timedelta(iso: str) -> timedelta:
     hour, minute, second = iso.split(':')
     return timedelta(hours=int(hour), minutes=int(minute), seconds=int(second))
+
+
+Info = namedtuple('Info', ['order', 'key', 'time', 'station_pk'])
+
+
+def mutate_info(item: dict[str, str], cur: sqlite3.Cursor) -> Info:
+    cur.execute('SELECT pk FROM station WHERE code=?', (item['Station'],))
+    station_pk = cur.fetchone()['pk']
+    for key in ('ARRTime', 'DEPTime'):
+        yield Info(
+            order=get_order(item),
+            key=key, station_pk=station_pk,
+            time=iso_time_to_timedelta(item[key])
+        )
+
+
+def partition(pred: Callable[[Info], bool], iterable: [Info]) -> tuple(Generator[Info], Generator[Info]):
+    "Use a predicate to partition entries into false entries and true entries"
+    # partition(is_odd, range(10)) --> 0 2 4 6 8   and  1 3 5 7 9
+    t1, t2 = tee(iterable)
+    return filterfalse(pred, t1), filter(pred, t2)
+
+
+def is_corner_case(order: int, last_order: int, key: str, time_: timedelta) -> bool:
+    '''
+    Arrive at its last stop before midnight,
+    stay for some time, and
+    out of service after midnight
+    '''
+    guess_last_stop_max_stay_time = timedelta(minutes=30)
+    return (order == last_order and key == 'DEPTime' and time_ < guess_last_stop_max_stay_time)
+
+
+def need_to_adjust_time(info: Info, over_night_order: int, last_order: int) -> bool:
+    guessed_over_night_stop_max_stay_time = timedelta(hours=1)
+    return (info.order == over_night_order and info.time < guessed_over_night_stop_max_stay_time)\
+        or info.order > over_night_order\
+        or is_corner_case(info.order, last_order, info.key, info.time)
+
+
+def insert_(last_pk: Union[None, int], current: Info, cur: sqlite3.Cursor, train_pk: int) -> int:
+    sql_statement = '''
+        INSERT INTO
+            timetable
+            (station_fk, train_fk, time, previous, order_)
+        VALUES
+            (:station_pk, :train_pk, :time, :previous, :order)
+        RETURNING
+            timetable.pk
+    '''
+
+    input_ = {
+        'station_pk': current.station_pk, 'train_pk': train_pk,
+        'time': current.time, 'previous': None, 'order': current.order,
+    }
+    if last_pk:
+        input_['previous'] = last_pk
+    cur.execute(sql_statement, input_)
+    return cur.fetchone()['pk']
+
+
+def insert_points_of_time(cur: sqlite3.Cursor, time_infos: list[dict[str, str]],
+                          over_night_station_order: int, train: str, train_pk: int,
+                          last_order: int):
+    mutant = (xx for x in time_infos for xx in mutate_info(item=x, cur=cur))
+    before_midnight, after_midnight = partition(
+        partial(need_to_adjust_time, over_night_order=over_night_station_order, last_order=last_order),
+        mutant)
+    adjusted_infos = map(
+        lambda x: Info(order=x.order, key=x.key, station_pk=x.station_pk, time=x.time + timedelta(days=1)),
+        after_midnight)
+    times = sorted(chain(before_midnight, adjusted_infos), key=lambda x: (x.order, x.key))
+
+    insert = partial(insert_, cur=cur, train_pk=train_pk)
+    first_pk = insert(last_pk=None, current=times[0])
+    reduce(insert, times[1:], first_pk)
+
+
+def get_over_night_station_order(station_code: Union[None, int], infos: list[dict[str, str]]) -> float:
+    if station_code:
+        order = next((float(info['Order']) for info in infos if info['Station'] == station_code))
+    else:
+        order = float('inf')
+    return order
 
 
 def fill_in_timetable(cur: sqlite3.Cursor, timetable: Path):
@@ -220,55 +303,12 @@ def fill_in_timetable(cur: sqlite3.Cursor, timetable: Path):
                 {'train_type_pk': train_type_pk, 'code': train['Train']}
             )
             train_pk = cur.fetchone()['pk']
-            over_night_station = train['OverNightStn']
-            previous = None
-            start_over_night_route = False
-            for time_info in train['TimeInfos']:
-                station_code = time_info['Station']
-                cur.execute(
-                    'SELECT pk FROM station WHERE code=?',
-                    (station_code,))
-                station_pk = cur.fetchone()['pk']
-                for key in ('ARRTime', 'DEPTime'):
-                    time_ = iso_time_to_timedelta(time_info[key])
-                    order = get_order(time_info)
-                    if station_code == over_night_station:
-                        start_over_night_route = True
-                        # it seems that no train would travel/stay for
-                        # more than one hour around midnight
-                        # so we have this hack
-                        if time_ < FIRST_HOUR:
-                            time_ += NEXT_DAY
-                    elif start_over_night_route\
-                            or (order == len(train['TimeInfos']) and key == 'DEPTime'
-                                and NEXT_DAY - iso_time_to_timedelta(time_info['ARRTime']) < timedelta(minutes=5)
-                                and time_ < timedelta(minutes=5)):
-                        # arrive at the last stop within 5 minutes before midnight,
-                        # and stay after midnight for at most 5 minutes
-                        time_ += NEXT_DAY
-                    cur.execute(
-                        '''
-                        INSERT INTO
-                            timetable
-                            (station_fk, train_fk, time, previous, order_)
-                        VALUES
-                            (:station_pk, :train_pk, :time, :previous, :order)
-                        RETURNING
-                            timetable.pk
-                        ''',
-                        {'station_pk': station_pk, 'train_pk': train_pk,
-                         'time': time_, 'previous': previous, 'order': order}
-                    )
-                    current = cur.fetchone()['pk']
-                    if previous:
-                        cur.execute(
-                            'UPDATE timetable SET next=:current WHERE pk=:previous',
-                            {'current': current, 'previous': previous}
-                        )
-                    previous = current
+            over_night_station_order = get_over_night_station_order(train['OverNightStn'], train['TimeInfos'])
+            last_order = get_order(max(train['TimeInfos'], key=get_order))
+            insert_points_of_time(cur, train['TimeInfos'], over_night_station_order, train, train_pk, last_order)
 
 
-def patch_stations(cur):
+def patch_stations(cur: sqlite3.Cursor):
     cur.execute(
         'SELECT station.pk FROM station WHERE station.code="3330"'
     )

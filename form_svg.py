@@ -20,6 +20,8 @@ PADDING = 50
 ENLARGE_GAP_RATE = 10
 FONT_HEIGHT = 12
 
+CSS = Path('style.css').read_text()
+
 
 def print_(s: str):
     print('\033[K', end='\r')  # clear_previous_print
@@ -53,7 +55,7 @@ def form_hour_lines(height: int, start_hour: int, hour_count: int) -> list[str]:
                 text = '{:0>2d}00'.format(i // 6)
             else:
                 text = f'{i % 6}0'
-            result.append(f'<text x="{x}" y="{PADDING - 1 + j}" class="{type_}_text">{text}</text>')
+            result.append(f'<text x="{x}" y="{PADDING - 1 + j}" class="{type_}">{text}</text>')
     return result
 
 
@@ -70,16 +72,13 @@ def form_station_lines(cur: sqlite3.Cursor, width: int) -> list[str]:
             type_ = active_type[is_active]
             result.append(f'<line x1="{PADDING}" x2="{width - PADDING}" y1="{y}" y2="{y}" class="{type_}" />')
             for i in range(0, width, HOUR_GAP):
-                result.append(f'<text x="{i}" y="{y - 5}" class="{type_}_text">{name}</text>')
+                result.append(f'<text x="{i}" y="{y - 5}" class="{type_}">{name}</text>')
         stations = cur.fetchmany()
     return result
 
 
 def form_grid(con: sqlite3.Connection, route_name: str,
-              height: int, width: int, start_hour: int, hour_count: int) -> list[str]:
-    result = []
-    result.extend(form_hour_lines(height, start_hour, hour_count))
-
+              height: int, width: int, start_hour: int, hour_count: int) -> tuple[str]:
     cur = con.execute(
         '''
         SELECT
@@ -99,7 +98,10 @@ def form_grid(con: sqlite3.Connection, route_name: str,
         ''',
         (route_name,)
     )
-    result.extend(form_station_lines(cur, width))
+    result = tuple(
+        (*form_hour_lines(height, start_hour, hour_count),
+         *form_station_lines(cur, width))
+    )
     return result
 
 
@@ -193,7 +195,7 @@ def form_train_lines(con: sqlite3.Connection, start_hour: int,
                     <textPath
                       startOffset="{PADDING + i}"
                       xlink:href="#{code}"
-                      class="{type_to_css[train_type]}_text">
+                      class="{type_to_css[train_type]}">
                         <tspan dy="-3">
                             {code}
                         </tspan>
@@ -213,75 +215,20 @@ def form_svg(con: sqlite3.Connection, route_name: str,
              start_hour: int, hour_count: int,
              segments: dict[tuple[str, str], tuple[tuple[int, int]]]
              ) -> str:
-    result = [
-        f'''<svg
-        xmlns="http://www.w3.org/2000/svg"
-        xmlns:xlink="http://www.w3.org/1999/xlink"
-        width="{width + 2 * PADDING}"
-        height="{height + 2 * PADDING}">
+    result = tuple((
+        f'''
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            xmlns:xlink="http://www.w3.org/1999/xlink"
+            width="{width + 2 * PADDING}"
+            height="{height + 2 * PADDING}"
+        >
         ''',
-        '''
-        <style>
-            line{stroke-width: 0.3}
-
-            .hour{stroke: black}
-            .hour_text{fill: black}
-
-            .min30{stroke: darkblue}
-            .min30_text{fill: grey}
-
-            .min10{stroke: slateblue}
-            .min10_text{fill: lightgrey}
-
-            .station{stroke: black}
-            .station_text{fill: black}
-
-            .noserv_station{stroke: grey}
-            .noserv_station_text{fill: grey}
-
-            path{stroke-width: 2;fill: none}
-
-            .taroko{stroke: hsl(300, 0%, 65%)}
-            .taroko_text{fill: hsl(300, 0%, 65%)}
-
-            .puyuma{stroke: red}
-            .puyuma_text{fill: red}
-
-            .tze_chiang{stroke: hsl(14, 44%, 79%)}
-            .tze_chiang_text{fill: hsl(14, 44%, 79%)}
-
-            .tze_chiang_diesel{stroke: hsl(30, 100%, 70%)}
-            .tze_chiang_diesel_text{fill: hsl(30, 100%, 70%)}
-
-            .emu1200{stroke: hsl(327, 100%, 80%); stroke-dasharray: 25,5}
-            .emu1200_text{fill: hsl(327, 100%, 80%)}
-
-            .emu300{stroke: hsl(0, 73%, 100%); stroke-dasharray: 25,5}
-            .emu300_text{fill: hsl(0, 73%, 100%)}
-
-            .chu_kuang{stroke: hsl(48, 100%, 80%)}
-            .chu_kuang_text{fill: hsl(48, 100%, 80%)}
-
-            .local{stroke: hsl(240, 100%, 80%)}
-            .local_text{fill: hsl(240, 100%, 80%)}
-
-            .fu_hsing{stroke: hsl(220, 49%, 86%)}
-            .fu_hsing_text{fill: hsl(220, 49%, 86%)}
-
-            .ordinary{stroke: black}
-            .ordinary_text{fill: black}
-
-            .special{stroke: hsl(120, 70%, 100%)}
-            .special_text{fill: hsl(120, 70%, 100%)}
-        </style>
-        '''
-    ]
-
-    result.extend(form_grid(con, route_name, height, width, start_hour, hour_count))
-
-    result.extend(form_train_lines(con, start_hour=start_hour, segments=segments, route_name=route_name))
-
-    result.append('</svg>')
+        f'<style>{CSS}</style>',
+        *form_grid(con, route_name, height, width, start_hour, hour_count),
+        *form_train_lines(con, start_hour=start_hour, segments=segments, route_name=route_name),
+        '</svg>'
+    ))
     return '\n'.join(result)
 
 
@@ -359,7 +306,7 @@ def decide_layout(con: sqlite3.Connection, route_name: str) -> (int, int, int, i
             segment
         GROUP BY
             segment.code, segment.group_
-        HAVING
+        HAVING  -- Not travel on the route
             COUNT(segment.current) > 2
         ''',
         {'name': route_name}
@@ -394,7 +341,7 @@ def get_route_names(con: sqlite3.Connection) -> tuple[str]:
             timetable.station_fk = station.pk
         WHERE
             route_station.relative_distance != 0
-            -- with DISTINCT, exclude routes that has no stations
+            -- with DISTINCT, exclude routes that have only one station
         '''
     )
     return tuple(r['name'] for r in cur.fetchall())
