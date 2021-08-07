@@ -59,7 +59,7 @@ def form_hour_lines(height: int, start_hour: int, hour_count: int) -> list[str]:
     return result
 
 
-active_type = {True: 'station', False: 'noserv_station'}
+active_type = {1: 'station', 0: 'noserv_station'}
 
 
 def form_station_lines(cur: sqlite3.Cursor, width: int) -> list[str]:
@@ -340,8 +340,7 @@ def get_route_names(con: sqlite3.Connection) -> tuple[str]:
         JOIN timetable ON
             timetable.station_fk = station.pk
         WHERE
-            route_station.relative_distance != 0
-            -- with DISTINCT, exclude routes that have only one station
+            route_station.relative_distance != 0 -- exclude routes that have only one station
         '''
     )
     return tuple(r['name'] for r in cur.fetchall())

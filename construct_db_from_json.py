@@ -81,7 +81,7 @@ def create_schema(con: sqlite3.Connection):
         (
         pk INTEGER PRIMARY KEY AUTOINCREMENT
         ,code TEXT UNIQUE NOT NULL
-        ,is_active bool DEFAULT 0 NOT NULL
+        ,is_active INTEGER DEFAULT 0 NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS station_name_cht
@@ -154,6 +154,26 @@ def fill_in_stations(cur: sqlite3.Cursor, station: Path):
         )
 
 
+# https://github.com/billy1125/TRA_time_space_diagram/blob/master/CSV/Category.csv
+irregular_stations = {
+    '7075': '觀音號誌',
+    '7115': '永春',
+    '5173': '中央號誌',
+    '5177': '善安號誌',
+    '5180': '古莊號誌',
+    '5195': '富山號誌',
+    '5105': '多良',
+    '5205': '香蘭',
+    '5215': '三和',
+    '6115': '大禹',
+    '6135': '瑞北',
+    '6245': '干城',
+    # ? 田蒲 between 6250~7000. Not found
+    # ? 北回 between 4080~4090. Not found
+    # ? 南臺南 between 4220~4250. Multiple
+}
+
+
 def fill_in_routes(cur: sqlite3.Cursor, route: Path):
     with route.open() as f:
         route_json = json.load(f)
@@ -164,28 +184,39 @@ def fill_in_routes(cur: sqlite3.Cursor, route: Path):
         )
         route_pk = cur.fetchone()['pk']
         for route_info in routes:
+            station_code = route_info['fkSta']
             cur.execute(
                 'SELECT pk FROM station WHERE code=?',
-                (route_info['fkSta'],)
+                (station_code,)
             )
             station_row = cur.fetchone()
             if station_row:
                 station_pk = station_row['pk']
                 cur.execute(
                     'UPDATE station SET is_active=:bool WHERE pk=:pk',
-                    {'pk': station_pk, 'bool': True}
+                    {'pk': station_pk, 'bool': 1}
                 )
+            else:
                 cur.execute(
-                    '''
-                    INSERT INTO
-                        route_station
-                        (route_fk, station_fk, relative_distance)
-                    VALUES
-                        (:route_pk, :station_pk, :distance)
-                    ''',
-                    {'route_pk': route_pk, 'station_pk': station_pk,
-                     'distance': float(route_info['staMil'])}
+                    'INSERT INTO station (code, is_active) VALUES (:code, :is_active) RETURNING pk',
+                    {'code': station_code, 'is_active': 0}
                 )
+                station_pk = cur.fetchone()['pk']
+                cur.execute(
+                    'INSERT INTO station_name_cht (station_fk, name) VALUES (:pk, :name)',
+                    {'pk': station_pk, 'name': irregular_stations.get(station_code, '')}
+                )
+            cur.execute(
+                '''
+                INSERT INTO
+                    route_station
+                    (route_fk, station_fk, relative_distance)
+                VALUES
+                    (:route_pk, :station_pk, :distance)
+                ''',
+                {'route_pk': route_pk, 'station_pk': station_pk,
+                 'distance': float(route_info['staMil'])}
+            )
 
 
 def get_order(item: dict[str, str]) -> int:
@@ -355,19 +386,9 @@ def convert_time(digits: Union[int, bytes]) -> timedelta:
     return timedelta(seconds=int(digits))
 
 
-def adapt_bool(b: bool) -> int:
-    return int(b)
-
-
-def convert_bool(b: bytes) -> bool:
-    return bool(b)
-
-
 def setup_sqlite(db_location: str) -> sqlite3.Connection:
     sqlite3.register_adapter(timedelta, adapt_time)
     sqlite3.register_converter('t_time', convert_time)
-    sqlite3.register_adapter(bool, adapt_bool)
-    sqlite3.register_converter('bool', convert_bool)
     con = sqlite3.connect(db_location, detect_types=sqlite3.PARSE_DECLTYPES)
     con.row_factory = sqlite3.Row
     return con
