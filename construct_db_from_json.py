@@ -297,11 +297,10 @@ def insert_points_of_time(cur: sqlite3.Cursor, time_infos: list[dict[str, str]],
     adjusted_infos = map(
         lambda x: Info(order=x.order, key=x.key, station_pk=x.station_pk, time=x.time + timedelta(days=1)),
         after_midnight)
-    times = sorted(chain(before_midnight, adjusted_infos), key=lambda x: (x.order, x.key))
-
-    insert = partial(insert_, cur=cur, train_pk=train_pk)
-    first_pk = insert(last_pk=None, current=times[0])
-    reduce(insert, times[1:], first_pk)
+    reduce(
+        partial(insert_, cur=cur, train_pk=train_pk),
+        sorted(chain(before_midnight, adjusted_infos), key=lambda x: (x.order, x.key)),
+        None)
 
 
 def get_over_night_station_order(station_code: Union[None, int], infos: list[dict[str, str]]) -> float:
