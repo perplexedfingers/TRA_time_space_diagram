@@ -148,7 +148,6 @@ def create_schema(con: sqlite3.Connection):
         ('station_fk', 'REFERENCES train_type ON DELETE CASCADE'),
         ('train_fk', 'REFERENCES train ON DELETE CASCADE'),
         ('previous', 'REFERENCE timetable NULL'),
-        ('next', 'REFERENCE timetable NULL'),
         ('time', 't_time NOT NULL'),
         ('order_', 'INTEGER NOT NULL'),
     )
