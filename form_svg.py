@@ -4,11 +4,15 @@ import argparse
 import sqlite3
 from collections import namedtuple
 from datetime import timedelta
-from functools import reduce
 from itertools import groupby
 from math import ceil
-from operator import add, attrgetter
+from operator import attrgetter
 from pathlib import Path
+from textwrap import dedent
+from typing import Union
+
+from pypika import Order, Parameter, Query, Tables
+from pypika.functions import Count, Max, Min
 
 from construct_db_from_json import (create_schema, load_data_from_json,
                                     setup_sqlite)
@@ -21,6 +25,9 @@ ENLARGE_GAP_RATE = 10
 FONT_HEIGHT = 12
 
 CSS = Path('style.css').read_text()
+
+TIMETABLE, STATION, STATION_NAME_CHT, ROUTE_STATION, TRAIN, ROUTE =\
+    Tables('timetable', 'station', 'station_name_cht', 'route_station', 'train', 'route')
 
 
 def print_(s: str):
@@ -59,20 +66,21 @@ def form_hour_lines(height: int, start_hour: int, hour_count: int) -> list[str]:
     return result
 
 
-active_type = {True: 'station', False: 'noserv_station'}
+active_type = {1: 'station', 0: 'noserv_station'}
 
 
 def form_station_lines(cur: sqlite3.Cursor, width: int) -> list[str]:
     cur.arraysize = 10  # random number
     result = []
     stations = cur.fetchmany()
+    y_offset = 5  # avoid conflict with hour number
     while stations:
-        station_y = tuple((s['is_active'], round(s['y'] * ENLARGE_GAP_RATE + PADDING), s['name']) for s in stations)
-        for is_active, y, name in station_y:
-            type_ = active_type[is_active]
+        for data in stations:
+            type_ = active_type[data['is_active']]
+            y = round(data['y'] * ENLARGE_GAP_RATE + PADDING)
             result.append(f'<line x1="{PADDING}" x2="{width - PADDING}" y1="{y}" y2="{y}" class="{type_}" />')
             for i in range(0, width, HOUR_GAP):
-                result.append(f'<text x="{i}" y="{y - 5}" class="{type_}">{name}</text>')
+                result.append(f'<text x="{i}" y="{y - y_offset}" class="{type_}">{data["name"]}</text>')
         stations = cur.fetchmany()
     return result
 
@@ -80,22 +88,16 @@ def form_station_lines(cur: sqlite3.Cursor, width: int) -> list[str]:
 def form_grid(con: sqlite3.Connection, route_name: str,
               height: int, width: int, start_hour: int, hour_count: int) -> tuple[str]:
     cur = con.execute(
-        '''
-        SELECT
-            station.is_active
-            ,station_name_cht.name
-            ,route_station.relative_distance AS y
-        FROM
-            station
-        JOIN station_name_cht ON
-            station.pk = station_name_cht.station_fk
-        JOIN route_station ON
-            station.pk = route_station.station_fk
-        JOIN route ON
-            route.pk = route_station.route_fk
-        WHERE
-            route.name = ?
-        ''',
+        Query.from_(STATION)
+        .join(STATION_NAME_CHT).on(STATION.pk == STATION_NAME_CHT.station_fk)
+        .join(ROUTE_STATION).on(STATION.pk == ROUTE_STATION.station_fk)
+        .join(ROUTE).on(ROUTE_STATION.route_fk == ROUTE.pk)
+        .where(ROUTE.name == Parameter('?'))
+        .select(
+            STATION.is_active,
+            STATION_NAME_CHT.name,
+            ROUTE_STATION.relative_distance.as_('y')
+        ).get_sql(),
         (route_name,)
     )
     result = tuple(
@@ -109,29 +111,21 @@ def get_time_list(con: sqlite3.Connection,
                   code: str, route_name: str,
                   from_: int, to: int) -> tuple[(str, float)]:
     cur = con.execute(
-        '''
-        SELECT
-            timetable.time AS x
-            ,route_station.relative_distance AS y
-        FROM
-            timetable
-        JOIN station ON
-            timetable.station_fk = station.pk
-        JOIN route_station ON
-            station.pk = route_station.station_fk
-        JOIN train ON
-            timetable.train_fk = train.pk
-        JOIN route ON
-            route.pk = route_station.route_fk
-        WHERE
-            route.name = :name
-        AND
-            train.code = :code
-        AND
-            timetable.order_ BETWEEN :from AND :to
-        ORDER BY
-            timetable.time ASC
-        ''',
+        Query.from_(TIMETABLE)
+        .join(STATION).on(TIMETABLE.station_fk == STATION.pk)
+        .join(ROUTE_STATION).on(STATION.pk == ROUTE_STATION.station_fk)
+        .join(TRAIN).on(TIMETABLE.train_fk == TRAIN.pk)
+        .join(ROUTE).on(ROUTE_STATION.route_fk == ROUTE.pk)
+        .where(
+            (ROUTE.name == Parameter(':name'))
+            & (TRAIN.code == Parameter(':code'))
+            & (TIMETABLE.order_[Parameter(':from'):Parameter(':to')])
+        )
+        .orderby(TIMETABLE.time, order=Order.asc)
+        .select(
+            TIMETABLE.time.as_('x'),
+            ROUTE_STATION.relative_distance.as_('y')
+        ).get_sql(),
         {'code': code, 'name': route_name,
          'from': from_, 'to': to}
     )
@@ -178,16 +172,21 @@ def form_train_lines(con: sqlite3.Connection, start_hour: int,
     result = []
     x_offset = timedelta(hours=start_hour)
     count = 1
-    amount = reduce(add, tuple(len(tuple(i for i in s)) for s in segments.values()), 0)
+    amount = sum(len(tuple(i for i in s)) for s in segments.values())
     print_(f'{amount} segments to process in "{route_name}"')
     for (code, train_type), _segments in segments.items():
         for from_, to in _segments:
             time_list = get_time_list(con, code, route_name, from_, to)
             d = ' '.join(
-                (f'{round((x - x_offset).total_seconds() * SECOND_GAP) + PADDING},{y * ENLARGE_GAP_RATE + PADDING}'
+                (dedent(f'''
+                 {round((x - x_offset).total_seconds() * SECOND_GAP) + PADDING},
+                 {y * ENLARGE_GAP_RATE + PADDING}
+                 ''').strip()
                  for x, y in time_list)
             )
-            result.append(f'<path id="{code}" d="M {d}" class="{type_to_css[train_type]}"></path>')
+            result.append(
+                f'<path id="{code}" d="M {d}" class="{type_to_css[train_type]}"></path>'
+            )
             time_span = round((max(time_list)[0] - min(time_list)[0]).total_seconds())
             result.extend([
                 f'''
@@ -225,8 +224,10 @@ def form_svg(con: sqlite3.Connection, route_name: str,
         >
         ''',
         f'<style>{CSS}</style>',
-        *form_grid(con, route_name, height, width, start_hour, hour_count),
-        *form_train_lines(con, start_hour=start_hour, segments=segments, route_name=route_name),
+        *form_grid(con=con, route_name=route_name, height=height, width=width,
+                   start_hour=start_hour, hour_count=hour_count),
+        *form_train_lines(con, start_hour=start_hour, segments=segments,
+                          route_name=route_name),
         '</svg>'
     ))
     return '\n'.join(result)
@@ -243,23 +244,11 @@ def get_code_n_train_type(t: Info) -> tuple[str, str]:
     return (t.code, t.train_type)
 
 
-def decide_layout(con: sqlite3.Connection, route_name: str) -> (int, int, int, int, tuple[str, str]):
-    cur = con.execute(
-        '''
-        SELECT
-            max(route_station.relative_distance) as height
-        FROM
-            route_station
-        JOIN route ON
-            route.pk = route_station.route_fk
-        WHERE
-            route.name = ?
-        ''',
-        (route_name,)
-    )
-    height = round(cur.fetchone()['height'] * ENLARGE_GAP_RATE)
-
-    cur = con.execute(
+def gen_recursive_cte_statement(given_train_codes: Union[None, list[str]]):
+    # No recursive CTE from pypika yet
+    # Sqlite3 'RETURNING' is not yet supported by either SQLAlchemy or peewee
+    # So we have this workaround
+    statement = [
         '''
         WITH RECURSIVE
             segment (code, train_type, x, y, previous, current, order_, group_) AS (
@@ -281,9 +270,12 @@ def decide_layout(con: sqlite3.Connection, route_name: str) -> (int, int, int, i
                             JOIN station AS st ON t.station_fk = st.pk
                             JOIN route_station AS rs ON st.pk = rs.station_fk
                             JOIN route AS ro ON rs.route_fk = ro.pk
-                            WHERE ro.name = :name AND t.pk = _t.previous)
+                            WHERE ro.name = :route AND t.pk = _t.previous)
                     )
-                    AND route.name = :name
+                    AND route.name = :route
+        ''',
+        '',
+        '''
                 UNION
                     SELECT
                         train.code, train_type.code, timetable.time, route_station.relative_distance,
@@ -296,7 +288,7 @@ def decide_layout(con: sqlite3.Connection, route_name: str) -> (int, int, int, i
                     JOIN route_station ON station.pk = route_station.station_fk
                     JOIN route ON route_station.route_fk = route.pk
                     WHERE
-                        route.name = :name
+                        route.name = :route
             )
         SELECT
             code, train_type,
@@ -306,19 +298,47 @@ def decide_layout(con: sqlite3.Connection, route_name: str) -> (int, int, int, i
             segment
         GROUP BY
             segment.code, segment.group_
-        HAVING  -- Not travel on the route
+        HAVING  -- Travel more than one stop on the route
             COUNT(segment.current) > 2
-        ''',
-        {'name': route_name}
-    )
+        '''
+    ]
+
+    if given_train_codes:
+        _parameters = ', '.join(f':{i}' for i in range(len(given_train_codes)))
+        statement[1] = f'AND train.code IN ({_parameters})'
+    return ''.join(statement)
+
+
+def decide_layout(con: sqlite3.Connection, route_name: str,
+                  given_train_codes: Union[None, list[str]]) -> (int, int, int, int, tuple[str, str]):
+    parameters = {'route': route_name}
+    cur = con.execute(
+        Query.from_(ROUTE_STATION)
+        .join(ROUTE).on(ROUTE_STATION.route_fk == ROUTE.pk)
+             .where(ROUTE.name == Parameter(':route'))
+             .select(
+            (Max(ROUTE_STATION.relative_distance) - Min(ROUTE_STATION.relative_distance))
+                 .as_('height'),
+        ).get_sql(),
+        parameters)
+    result = cur.fetchone()
+    height = round(result['height'] * ENLARGE_GAP_RATE)
+
+    if given_train_codes:
+        for i, code in zip(range(len(given_train_codes)), given_train_codes):
+            parameters[str(i)] = code
+    cur = con.execute(gen_recursive_cte_statement(given_train_codes), parameters)
     infos = tuple(
         Info(early=r['early'], late=r['late'],
              code=r['code'], train_type=r['train_type'],
              from_=r['from_'], to=r['to_'])
         for r in cur.fetchall())
-    segments = {key: tuple((row.from_, row.to) for row in r)
-                for key, r in groupby(sorted(infos, key=get_code_n_train_type),
-                                      key=get_code_n_train_type)}
+    segments = {
+        key: tuple((row.from_, row.to) for row in r)
+        for key, r in groupby(
+            sorted(infos, key=get_code_n_train_type),
+            key=get_code_n_train_type)
+    }
     start_hour = seconds_to_hours(min(infos, key=attrgetter('early')).early)
     end_hour = seconds_to_hours(max(infos, key=attrgetter('late')).late) + 1
     hour_count = end_hour - start_hour + 1
@@ -326,24 +346,24 @@ def decide_layout(con: sqlite3.Connection, route_name: str) -> (int, int, int, i
     return height, width, start_hour, hour_count, segments
 
 
-def get_route_names(con: sqlite3.Connection) -> tuple[str]:
-    cur = con.execute(
-        '''
-        SELECT
-            DISTINCT route.name
-        FROM
-            route
-        JOIN route_station ON
-            route_station.route_fk = route.pk
-        JOIN station ON
-            route_station.station_fk = station.pk
-        JOIN timetable ON
-            timetable.station_fk = station.pk
-        WHERE
-            route_station.relative_distance != 0
-            -- with DISTINCT, exclude routes that have only one station
-        '''
+def get_route_names(con: sqlite3.Connection, given_train_codes: Union[None, list[str]]) -> tuple[str]:
+    query = (
+        Query.from_(ROUTE)
+        .join(ROUTE_STATION).on(ROUTE.pk == ROUTE_STATION.route_fk)
+        .join(STATION).on(ROUTE_STATION.station_fk == STATION.pk)
+        .join(TIMETABLE).on(STATION.pk == TIMETABLE.station_fk)
+        .where(ROUTE_STATION.relative_distance != 0)  # exclude routes that have only one station
+        .select(ROUTE.name).distinct()
     )
+    if given_train_codes:
+        _parameters = ', '.join('?' for _ in range(len(given_train_codes)))
+        query = query.join(TRAIN).on(TIMETABLE.train_fk == TRAIN.pk)\
+            .where(TRAIN.code.isin(Parameter(f'({_parameters})')))\
+            .groupby(TRAIN.code, ROUTE.name)\
+            .having(Count(STATION.pk) > 2)  # travel more than one stop on the route
+        cur = con.execute(query.get_sql(), tuple(given_train_codes))
+    else:
+        cur = con.execute(query.get_sql())
     return tuple(r['name'] for r in cur.fetchall())
 
 
@@ -376,6 +396,11 @@ def get_arg_parser() -> argparse.ArgumentParser:
         '-O',
         default='OUTPUT', type=str, dest='output_folder',
         help='Output folder')
+
+    parser.add_argument(
+        '-T',
+        default=None, type=str, dest='train_list', nargs='*',
+        help='Only draw these trains')
     return parser
 
 
@@ -395,10 +420,11 @@ if __name__ == '__main__':
                 timetable=args.input_folder / f'{args.timetable_name}.json',
             )
         print_('Finish loading data')
-        route_names = get_route_names(con)
+        route_names = get_route_names(con, given_train_codes=args.train_list)
         print_(f'There are {len(route_names)} routes to process')
         for i, route in enumerate(route_names, start=1):
-            height, width, start_hour, hour_count, segments = decide_layout(con, route_name=route)
+            height, width, start_hour, hour_count, segments =\
+                decide_layout(con, route_name=route, given_train_codes=args.train_list)
             result = form_svg(
                 con=con, route_name=route,
                 height=height, width=width,

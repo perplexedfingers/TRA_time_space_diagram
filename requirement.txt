@@ -1,1 +1,2 @@
 beautifulsoup4==4.9.3
+PyPika==0.48.8
