@@ -77,6 +77,11 @@ CAR_CLASS = {  # copy from developer manual in timetable webpage
 }
 
 
+def print_(s: str):
+    print('\033[K', end='\r')  # clear_previous_print
+    print(s, end='\r')
+
+
 def create_schema(con: sqlite3.Connection):
     cur = con.cursor()
 
@@ -371,36 +376,16 @@ def fill_in_timetable(cur: sqlite3.Cursor, timetable: Path):
             insert_points_of_time(cur, train['TimeInfos'], over_night_station_order, train, train_pk, last_order)
 
 
-def patch_stations(cur: sqlite3.Cursor):
-    station_table = Table('station')
-    route_station_table = Table('route_station')
-    select_station_pk = Query.from_(station_table)\
-        .where(station_table.code == Parameter('?')).select('pk').get_sql()
-    update_station_distaince = Query.update(route_station_table)\
-        .set('relative_distance', Parameter(':distance'))\
-        .where(route_station_table.station_fk == Parameter(':pk')).get_sql()
-
-    data = (
-        ('3330', 200.5),  # WuRi
-        ('1180', 100.6),  # ZhuBei
-        ('6030', 300.5),  # RuiYuan
-    )
-    for code, distance in data:
-        cur.execute(
-            select_station_pk, (code,)
-        )
-        pk = cur.fetchone()['pk']
-        cur.execute(update_station_distaince, {'distance': distance, 'pk': pk})
-
-
 def load_data_from_json(con: sqlite3.Connection, route: Path,
                         station: Path, timetable: Path):
     cur = con.cursor()
     # Due to database schema, must be in this order
+    print_('Fill in station')
     fill_in_stations(cur, station)
+    print_('Fill in route')
     fill_in_routes(cur, route)
+    print_('Fill in timetable')
     fill_in_timetable(cur, timetable)
-    patch_stations(cur)
 
 
 def adapt_time(t: timedelta) -> int:
