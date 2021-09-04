@@ -4,15 +4,16 @@ import argparse
 import sqlite3
 from collections import namedtuple
 from datetime import timedelta
-from itertools import groupby
+from itertools import chain, filterfalse, groupby, tee
 from math import ceil
-from operator import attrgetter
+from operator import attrgetter, itemgetter
 from pathlib import Path
 from textwrap import dedent
 from typing import Union
 
 from pypika import Order, Parameter, Query, Tables
 from pypika.functions import Count, Max, Min
+from yattag import Doc
 
 from construct_db_from_json import (create_schema, load_data_from_json,
                                     setup_sqlite)
@@ -45,66 +46,48 @@ def min_type(min_: int) -> str:
     return type_
 
 
-def form_hour_lines(height: int, start_hour: int, hour_count: int) -> list[str]:
+LineInfo = namedtuple('LineInfo', ['x1', 'y1', 'x2', 'y2', 'klass'])
+TextInfo = namedtuple('TextInfo', ['x', 'y', 'klass', 'text'])
+
+
+def form_hour_lines(height: int, start_hour: int, hour_count: int) -> (LineInfo, TextInfo):
     bottom_y = PADDING + height
     text_gap = max(min(TEN_MINUTE_GAP * 3, height), FONT_HEIGHT + PADDING)
 
-    result = []
+    line, text = [], []
     every_ten_min_x = [
         PADDING + m * TEN_MINUTE_GAP + i * HOUR_GAP
         for i in range(hour_count) for m in range(6)
     ] + [PADDING + hour_count * HOUR_GAP]  # the very last hour
     for i, x in enumerate(every_ten_min_x, start=start_hour * 6):
         type_ = min_type(i)
-        result.append(f'<line x1="{x}" x2="{x}" y1="{PADDING}" y2="{bottom_y}" class="{type_}" />')
+        line.append(LineInfo(x1=x, x2=x, y1=PADDING, y2=bottom_y, klass=type_))
         for j in range(0, min(ceil(height + text_gap), height + PADDING), text_gap):
             if type_ == 'hour':
-                text = '{:0>2d}00'.format(i // 6)
+                _text = '{:0>2d}00'.format(i // 6)
             else:
-                text = f'{i % 6}0'
-            result.append(f'<text x="{x}" y="{PADDING - 1 + j}" class="{type_}">{text}</text>')
-    return result
+                _text = f'{i % 6}0'
+            text.append(TextInfo(x=x, y=PADDING - 1 + j, klass=type_, text=_text))
+    return line, text
 
 
 active_type = {1: 'station', 0: 'noserv_station'}
 
 
-def form_station_lines(cur: sqlite3.Cursor, width: int) -> list[str]:
+def form_station_lines(cur: sqlite3.Cursor, width: int) -> (LineInfo, TextInfo):
     cur.arraysize = 10  # random number
-    result = []
+    line, text = [],  []
     stations = cur.fetchmany()
     y_offset = 5  # avoid conflict with hour number
     while stations:
         for data in stations:
             type_ = active_type[data['is_active']]
             y = round(data['y'] * ENLARGE_GAP_RATE + PADDING)
-            result.append(f'<line x1="{PADDING}" x2="{width - PADDING}" y1="{y}" y2="{y}" class="{type_}" />')
-            for i in range(0, width, HOUR_GAP):
-                result.append(f'<text x="{i}" y="{y - y_offset}" class="{type_}">{data["name"]}</text>')
+            line.append(LineInfo(x1=PADDING, x2=width - PADDING, y1=y, y2=y, klass=type_))
+            text.extend([TextInfo(x=i, y=y - y_offset, klass=type_, text=data["name"])
+                         for i in range(0, width, HOUR_GAP)])
         stations = cur.fetchmany()
-    return result
-
-
-def form_grid(con: sqlite3.Connection, route_name: str,
-              height: int, width: int, start_hour: int, hour_count: int) -> tuple[str]:
-    cur = con.execute(
-        Query.from_(STATION)
-        .join(STATION_NAME_CHT).on(STATION.pk == STATION_NAME_CHT.station_fk)
-        .join(ROUTE_STATION).on(STATION.pk == ROUTE_STATION.station_fk)
-        .join(ROUTE).on(ROUTE_STATION.route_fk == ROUTE.pk)
-        .where(ROUTE.name == Parameter('?'))
-        .select(
-            STATION.is_active,
-            STATION_NAME_CHT.name,
-            ROUTE_STATION.relative_distance.as_('y')
-        ).get_sql(),
-        (route_name,)
-    )
-    result = tuple(
-        (*form_hour_lines(height, start_hour, hour_count),
-         *form_station_lines(cur, width))
-    )
-    return result
+    return line, text
 
 
 def get_time_list(con: sqlite3.Connection,
@@ -166,47 +149,51 @@ type_to_css = {
 }
 
 
+PathInfo = namedtuple('PathInfo', ['id', 'd', 'klass'])
+TextPathInfo = namedtuple('TextPathInfo', ['offset', 'id', 'klass', 'text'])
+
+
 def form_train_lines(con: sqlite3.Connection, start_hour: int,
                      segments: dict[tuple[str, str], tuple[tuple[int, int]]],
-                     route_name: str) -> list[str]:
-    result = []
+                     route_name: str) -> (PathInfo, TextPathInfo):
+    pathes, text_pathes = [], []
     x_offset = timedelta(hours=start_hour)
+
     count = 1
     amount = sum(len(tuple(i for i in s)) for s in segments.values())
     print_(f'{amount} segments to process in "{route_name}"')
+
     for (code, train_type), _segments in segments.items():
         for from_, to in _segments:
             time_list = get_time_list(con, code, route_name, from_, to)
             d = ' '.join(
                 (dedent(f'''
-                 {round((x - x_offset).total_seconds() * SECOND_GAP) + PADDING},
+                 {round((x - x_offset).total_seconds() * SECOND_GAP + PADDING)},
                  {y * ENLARGE_GAP_RATE + PADDING}
                  ''').strip()
                  for x, y in time_list)
             )
-            result.append(
-                f'<path id="{code}" d="M {d}" class="{type_to_css[train_type]}"></path>'
+            pathes.append(PathInfo(id=code, d=d, klass=type_to_css[train_type]))
+            time_span = round(
+                (max(map(itemgetter(0), time_list)).total_seconds()
+                 - min(map(itemgetter(0), time_list)).total_seconds())
+                * SECOND_GAP
             )
-            time_span = round((max(time_list)[0] - min(time_list)[0]).total_seconds())
-            result.extend([
-                f'''
-                <text>
-                    <textPath
-                      startOffset="{PADDING + i}"
-                      xlink:href="#{code}"
-                      class="{type_to_css[train_type]}">
-                        <tspan dy="-3">
-                            {code}
-                        </tspan>
-                    </textPath>
-                </text>
-                '''
-                for i in range(0, time_span, min(time_span, 2 * TEN_MINUTE_GAP))
-            ])
+            text_pathes.extend(
+                [TextPathInfo(offset=i, id=code, klass=type_to_css[train_type], text=code)
+                 for i in range(PADDING, time_span - PADDING + 1, min(time_span - 2 * PADDING, 2 * TEN_MINUTE_GAP))]
+            )
+
             print_(f'{count} / {amount} segments to process in "{route_name}"')
             count += 1
-    print_(f'Finish "{route_name}"')
-    return result
+    return pathes, text_pathes
+
+
+def partition(pred, iterable):
+    "Use a predicate to partition entries into false entries and true entries"
+    # partition(is_odd, range(10)) --> 0 2 4 6 8   and  1 3 5 7 9
+    t1, t2 = tee(iterable)
+    return filterfalse(pred, t1), filter(pred, t2)
 
 
 def form_svg(con: sqlite3.Connection, route_name: str,
@@ -214,23 +201,59 @@ def form_svg(con: sqlite3.Connection, route_name: str,
              start_hour: int, hour_count: int,
              segments: dict[tuple[str, str], tuple[tuple[int, int]]]
              ) -> str:
-    result = tuple((
-        f'''
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            xmlns:xlink="http://www.w3.org/1999/xlink"
-            width="{width + 2 * PADDING}"
-            height="{height + 2 * PADDING}"
-        >
-        ''',
-        f'<style>{CSS}</style>',
-        *form_grid(con=con, route_name=route_name, height=height, width=width,
-                   start_hour=start_hour, hour_count=hour_count),
-        *form_train_lines(con, start_hour=start_hour, segments=segments,
-                          route_name=route_name),
-        '</svg>'
-    ))
-    return '\n'.join(result)
+    cur = con.execute(
+        Query.from_(STATION)
+        .join(STATION_NAME_CHT).on(STATION.pk == STATION_NAME_CHT.station_fk)
+        .join(ROUTE_STATION).on(STATION.pk == ROUTE_STATION.station_fk)
+        .join(ROUTE).on(ROUTE_STATION.route_fk == ROUTE.pk)
+        .where(ROUTE.name == Parameter('?'))
+        .select(
+            STATION.is_active,
+            STATION_NAME_CHT.name,
+            ROUTE_STATION.relative_distance.as_('y')
+        ).get_sql(),
+        (route_name,)
+    )
+    station_lines, station_texts = form_station_lines(cur=cur, width=width)
+    hour_lines, hour_texts = form_hour_lines(height=height, start_hour=start_hour, hour_count=hour_count)
+    pathes, text_pathes = form_train_lines(
+        con=con, start_hour=start_hour,
+        segments=segments, route_name=route_name
+    )
+
+    doc, tag, text, line = Doc().ttl()
+    doc.asis('<!DOCTYPE html>')
+    with tag('html'):
+        with tag('head'):
+            doc.stag('meta', charset='utf-8')
+            doc.stag('link', rel='icon', href='data:,')
+            line('title', route_name)
+            doc.stag('link', rel='stylesheet', href='style.css')  # TODO dynamic location
+        with tag('body'):
+            with tag(
+                'svg',
+                ('xmlns', 'http://www.w3.org/2000/svg'),
+                ('width', f'{width + 2 * PADDING}'),
+                ('height', f'{height + 2 * PADDING}')
+            ):
+                for _line in chain(hour_lines, station_lines):
+                    doc.stag('line', x1=_line.x1, x2=_line.x2, y1=_line.y1, y2=_line.y2, klass=_line.klass)
+                for text in chain(hour_texts, station_texts):
+                    line('text', text.text, x=text.x, y=text.y, klass=text.klass)
+                for id_, items in groupby(
+                    sorted(chain(pathes, text_pathes), key=attrgetter('id')),
+                        key=attrgetter('id')):
+                    with tag('g'):
+                        line('title', id_)
+                        text_pathes_, pathes_ = partition(lambda x: hasattr(x, 'd'), items)
+                        for path in pathes_:
+                            doc.stag('path', id=str(path.id), d=f'M {path.d}', klass=path.klass)
+                        for text_path in text_pathes_:
+                            with tag('text'):
+                                line('textPath', text_path.text, startOffset=text_path.offset,
+                                     href=f'#{text_path.id}', klass=text_path.klass)
+    print_(f'Finish "{route_name}"')
+    return doc.getvalue()
 
 
 def seconds_to_hours(t: int) -> int:
@@ -431,7 +454,7 @@ if __name__ == '__main__':
                 start_hour=start_hour, hour_count=hour_count,
                 segments=segments,
             )
-            with open(f'{args.output_folder}/{route}.svg', mode='w') as f:
+            with open(f'{args.output_folder}/{route}.html', mode='w') as f:
                 f.write(result)
-            print_(f'{i} / {len(route_names)} routes to go')
+            print_(f'{len(route_names) - i} / {len(route_names)} routes to go')
     print_('All done')
