@@ -5,7 +5,6 @@ import sqlite3
 from collections import namedtuple
 from datetime import timedelta
 from itertools import chain, filterfalse, groupby, tee
-from math import ceil
 from operator import attrgetter, itemgetter
 from pathlib import Path
 from textwrap import dedent
@@ -24,8 +23,6 @@ HOUR_GAP = round(3600 * SECOND_GAP)
 PADDING = 50
 ENLARGE_GAP_RATE = 10
 FONT_HEIGHT = 12
-
-CSS = Path('style.css').read_text()
 
 TIMETABLE, STATION, STATION_NAME_CHT, ROUTE_STATION, TRAIN, ROUTE =\
     Tables('timetable', 'station', 'station_name_cht', 'route_station', 'train', 'route')
@@ -46,48 +43,52 @@ def min_type(min_: int) -> str:
     return type_
 
 
+HourLineGroup = namedtuple('HourLineGroup', ['line', 'text'])
 LineInfo = namedtuple('LineInfo', ['x1', 'y1', 'x2', 'y2', 'klass'])
 TextInfo = namedtuple('TextInfo', ['x', 'y', 'klass', 'text'])
 
 
-def form_hour_lines(height: int, start_hour: int, hour_count: int) -> (LineInfo, TextInfo):
+def form_hour_lines(height: int, start_hour: int, hour_count: int) -> list[HourLineGroup]:
     bottom_y = PADDING + height
-    text_gap = max(min(TEN_MINUTE_GAP * 3, height), FONT_HEIGHT + PADDING)
 
-    line, text = [], []
+    result = []
     every_ten_min_x = [
         PADDING + m * TEN_MINUTE_GAP + i * HOUR_GAP
         for i in range(hour_count) for m in range(6)
     ] + [PADDING + hour_count * HOUR_GAP]  # the very last hour
     for i, x in enumerate(every_ten_min_x, start=start_hour * 6):
         type_ = min_type(i)
-        line.append(LineInfo(x1=x, x2=x, y1=PADDING, y2=bottom_y, klass=type_))
-        for j in range(0, min(ceil(height + text_gap), height + PADDING), text_gap):
-            if type_ == 'hour':
-                _text = '{:0>2d}00'.format(i // 6)
-            else:
-                _text = f'{i % 6}0'
-            text.append(TextInfo(x=x, y=PADDING - 1 + j, klass=type_, text=_text))
-    return line, text
+        result.append(
+            HourLineGroup(
+                line=LineInfo(x1=x, x2=x, y1=PADDING, y2=bottom_y, klass=type_),
+                text=TextInfo(x=x, y=PADDING - 1, klass=type_, text=f'{i // 6:0>2d}{i % 6}0')
+            )
+        )
+    return result
 
 
 active_type = {1: 'station', 0: 'noserv_station'}
 
+StationLineGroup = namedtuple('HourLineGroup', ['line', 'text'])
 
-def form_station_lines(cur: sqlite3.Cursor, width: int) -> (LineInfo, TextInfo):
+
+def form_station_lines(cur: sqlite3.Cursor, width: int) -> list[StationLineGroup]:
     cur.arraysize = 10  # random number
-    line, text = [],  []
+    result = []
     stations = cur.fetchmany()
     y_offset = 5  # avoid conflict with hour number
     while stations:
         for data in stations:
             type_ = active_type[data['is_active']]
             y = round(data['y'] * ENLARGE_GAP_RATE + PADDING)
-            line.append(LineInfo(x1=PADDING, x2=width - PADDING, y1=y, y2=y, klass=type_))
-            text.extend([TextInfo(x=i, y=y - y_offset, klass=type_, text=data["name"])
-                         for i in range(0, width, HOUR_GAP)])
+            result.append(
+                StationLineGroup(
+                    line=LineInfo(x1=PADDING, x2=width - PADDING, y1=y, y2=y, klass=type_),
+                    text=TextInfo(x=0, y=y - y_offset, klass=type_, text=data["name"])
+                )
+            )
         stations = cur.fetchmany()
-    return line, text
+    return result
 
 
 def get_time_list(con: sqlite3.Connection,
@@ -184,7 +185,7 @@ def form_train_lines(con: sqlite3.Connection, start_hour: int,
                  for i in range(PADDING, time_span - PADDING + 1, min(time_span - 2 * PADDING, 2 * TEN_MINUTE_GAP))]
             )
 
-            print_(f'{count} / {amount} segments to process in "{route_name}"')
+            print_(f'{count} / {amount} segments has been processed in "{route_name}"')
             count += 1
     return pathes, text_pathes
 
@@ -214,8 +215,8 @@ def form_svg(con: sqlite3.Connection, route_name: str,
         ).get_sql(),
         (route_name,)
     )
-    station_lines, station_texts = form_station_lines(cur=cur, width=width)
-    hour_lines, hour_texts = form_hour_lines(height=height, start_hour=start_hour, hour_count=hour_count)
+    station_groups = form_station_lines(cur=cur, width=width)
+    hour_groups = form_hour_lines(height=height, start_hour=start_hour, hour_count=hour_count)
     pathes, text_pathes = form_train_lines(
         con=con, start_hour=start_hour,
         segments=segments, route_name=route_name
@@ -228,7 +229,7 @@ def form_svg(con: sqlite3.Connection, route_name: str,
             doc.stag('meta', charset='utf-8')
             doc.stag('link', rel='icon', href='data:,')
             line('title', route_name)
-            doc.stag('link', rel='stylesheet', href='style.css')  # TODO dynamic location
+            doc.stag('link', rel='stylesheet', href='./style.css')  # TODO dynamic location
         with tag('body'):
             with tag(
                 'svg',
@@ -236,14 +237,27 @@ def form_svg(con: sqlite3.Connection, route_name: str,
                 ('width', f'{width + 2 * PADDING}'),
                 ('height', f'{height + 2 * PADDING}')
             ):
-                for _line in chain(hour_lines, station_lines):
-                    doc.stag('line', x1=_line.x1, x2=_line.x2, y1=_line.y1, y2=_line.y2, klass=_line.klass)
-                for text in chain(hour_texts, station_texts):
-                    line('text', text.text, x=text.x, y=text.y, klass=text.klass)
+                doc.stag('script', href='./fixed_header.js')
+                for group in hour_groups:
+                    with tag('g', klass='hour'):
+                        doc.stag(
+                            'line', klass=group.line.klass,
+                            x1=group.line.x1, x2=group.line.x2,
+                            y1=group.line.y1, y2=group.line.y2,
+                        )
+                        line('text', group.text.text, x=group.text.x, y=group.text.y, klass=group.text.klass)
+                for group in station_groups:
+                    with tag('g', klass='station'):
+                        doc.stag(
+                            'line', klass=group.line.klass,
+                            x1=group.line.x1, x2=group.line.x2,
+                            y1=group.line.y1, y2=group.line.y2,
+                        )
+                        line('text', group.text.text, x=group.text.x, y=group.text.y, klass=group.text.klass)
                 for id_, items in groupby(
                     sorted(chain(pathes, text_pathes), key=attrgetter('id')),
                         key=attrgetter('id')):
-                    with tag('g'):
+                    with tag('g', klass='train'):
                         line('title', id_)
                         text_pathes_, pathes_ = partition(lambda x: hasattr(x, 'd'), items)
                         for path in pathes_:
