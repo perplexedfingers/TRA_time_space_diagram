@@ -28,9 +28,7 @@
 
 ## 執行語言與所需相關套件
 
-目前本程式主要於 Python 3.7x 開發，除此之外本程式需要以下套件，包括：
-
-* [beautifulsoup4](https://github.com/getanewsletter/BeautifulSoup4)：用於擷取台鐵 JSON，本程式開發使用版本為 4.7.1
+目前本程式以 Python 3.9 開發, due to 'RETURNING' keyword in sqlite3.
 
 ## Usage
 
@@ -112,7 +110,7 @@ python from_svg.py -h
 
 ## 閱讀運行圖之方法
 
-本程式所轉換之運行圖，檔案副檔名為 **.svg**，請使用瀏覽器直接開啟檔案。
+本程式所轉換之運行圖，檔案副檔名為 **.html**，請使用瀏覽器直接開啟檔案。
 
 目前為止，本程式所轉換之運行圖於 Google Chrome、Mozilla Firefox、Opera、Apple Safari 均能正常顯示，至於其他瀏覽器尚未實地測試，若有問題也歡迎回報。
 
